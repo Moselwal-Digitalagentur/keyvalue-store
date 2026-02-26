@@ -1,0 +1,30 @@
+services:
+  _defaults:
+    autowire: true
+    autoconfigure: true
+    public: false
+
+  Moselwal\KeyValueStore\:
+    resource: '../Classes/'
+
+  # The factory and its dependencies must be public so they can be retrieved
+  # from the container by classes that are not themselves DI-managed (e.g.
+  # session and cache backends instantiated by TYPO3 before DI is fully available).
+  Moselwal\KeyValueStore\Connection\KeyValueConnectionFactory:
+    public: true
+
+  Moselwal\KeyValueStore\Connection\TlsContextBuilder:
+    public: true
+
+  Moselwal\KeyValueStore\Connection\SentinelResolver:
+    public: true
+
+  # Cache backends are instantiated by the TYPO3 cache framework, not by DI.
+  Moselwal\KeyValueStore\Cache\Backend\KeyValueBackend:
+    public: true
+    shared: false
+
+  # Session backends are instantiated by TYPO3's session manager.
+  Moselwal\KeyValueStore\Session\Backend\KeyValueSessionBackend:
+    public: true
+    shared: false
