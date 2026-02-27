@@ -15,12 +15,12 @@ final class KeyValueConnectionFactory
     ) {}
 
     /**
-     * Create a configured Redis connection.
+     * Create a configured Redis connection using the phpredis >= 6.0 constructor API.
      *
-     * Option keys align with the phpredis >= 6.0 constructor array.
+     * All connection parameters use the phpredis camelCase constructor keys.
      * Snake_case aliases are accepted for backward compatibility.
      *
-     * Connection options (phpredis camelCase primary / snake_case alias):
+     * Connection options:
      *   host            string   hostname, IP, or unix-socket path
      *   port            int      default 6379; -1 or 0 for unix socket
      *   connectTimeout  float    seconds, 0 = unlimited (alias: timeout)
@@ -54,9 +54,11 @@ final class KeyValueConnectionFactory
      *   sentinel_password string optional Sentinel AUTH password
      *
      * Behaviour:
-     *   lazy  bool  If true, use the phpredis 6.x constructor for lazy connect.
-     *               Auth and database are embedded in the constructor config and
-     *               applied automatically on the first command. Default: false.
+     *   lazy  bool  If true, the connection is deferred until the first command
+     *               (phpredis lazy-connect). If false (default), ping() is called
+     *               immediately to verify the connection and surface errors early.
+     *               Auth and database selection are always embedded in the
+     *               constructor config and applied automatically by phpredis.
      */
     public function create(array $options): \Redis
     {
@@ -65,36 +67,15 @@ final class KeyValueConnectionFactory
         $endpoint = $this->resolveEndpoint($options, $params->connectTimeout);
         $lazy = (bool)($options['lazy'] ?? false);
 
-        if ($lazy) {
-            return $this->createLazy($endpoint, $tlsContext, $params);
-        }
+        $redis = $this->buildRedis($endpoint, $tlsContext, $params);
 
-        $redis = new \Redis();
-        $this->connectEager($redis, $endpoint, $tlsContext, $params);
-        $this->postConnect($redis, $params);
+        if (!$lazy) {
+            // Force an immediate connection and surface any connectivity or auth errors.
+            // phpredis applies AUTH and SELECT automatically before executing ping().
+            $redis->ping();
+        }
 
         return $redis;
-    }
-
-    /**
-     * Ensure an existing Redis handle is connected; re-connects on failure.
-     * Pass the same $options array that was used for create().
-     */
-    public function ensureConnected(\Redis $redis, array $options): void
-    {
-        try {
-            $redis->ping();
-            return;
-        } catch (\Throwable) {
-            // fall through to reconnect
-        }
-
-        $params = ConnectionParams::fromOptions($options);
-        $tlsContext = $this->tlsContextBuilder->build($options);
-        $endpoint = $this->resolveEndpoint($options, $params->connectTimeout);
-
-        $this->connectEager($redis, $endpoint, $tlsContext, $params);
-        $this->postConnect($redis, $params);
     }
 
     // -------------------------------------------------------------------------
@@ -133,85 +114,19 @@ final class KeyValueConnectionFactory
     }
 
     // -------------------------------------------------------------------------
-    // Private: eager (immediate) connect path
+    // Private: Redis instance creation (phpredis >= 6.0 constructor)
     // -------------------------------------------------------------------------
 
     /**
-     * Establishes a connection using Redis::connect() / Redis::pconnect().
+     * Build a Redis instance using the phpredis >= 6.0 constructor config array.
      *
-     * connect() / pconnect() use positional snake_case parameters, not the
-     * constructor camelCase keys — phpredis intentionally has two APIs here.
-     */
-    private function connectEager(
-        \Redis $redis,
-        Endpoint $endpoint,
-        ?array $tlsContext,
-        ConnectionParams $params
-    ): void {
-        // Prefix host with tls:// so phpredis negotiates TLS on the socket.
-        $host = $tlsContext !== null ? ('tls://' . $endpoint->host) : $endpoint->host;
-
-        if ($params->persistent !== false) {
-            // pconnect: string persistent value = explicit ID; true = let phpredis choose.
-            $persistentId = is_string($params->persistent) ? $params->persistent : null;
-            $ok = $redis->pconnect(
-                $host,
-                $endpoint->port,
-                $params->connectTimeout,
-                $persistentId,
-                $params->retryInterval,
-                $params->readTimeout,
-                $tlsContext   // stream context array: ['ssl' => [...]]
-            );
-        } else {
-            $ok = $redis->connect(
-                $host,
-                $endpoint->port,
-                $params->connectTimeout,
-                null,
-                $params->retryInterval,
-                $params->readTimeout,
-                $tlsContext
-            );
-        }
-
-        if ($ok !== true) {
-            throw new \RedisException('Could not connect to Redis/Valkey endpoint.');
-        }
-    }
-
-    /**
-     * Run AUTH and SELECT after a successful eager connect.
-     */
-    private function postConnect(\Redis $redis, ConnectionParams $params): void
-    {
-        if ($params->auth !== null) {
-            $ok = $redis->auth($params->auth);
-            if ($ok !== true) {
-                throw new \RedisException('Redis AUTH failed.');
-            }
-        }
-
-        // Always SELECT explicitly — even database 0 — so that a reused persistent
-        // connection from a different database is reset to the correct one.
-        $ok = $redis->select($params->database);
-        if ($ok !== true) {
-            throw new \RedisException('Redis SELECT failed for database ' . $params->database);
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // Private: lazy connect path (phpredis >= 6.0 constructor)
-    // -------------------------------------------------------------------------
-
-    /**
-     * Build a phpredis >= 6.0 constructor config array and return a lazy Redis handle.
+     * The returned instance uses lazy connect: the TCP/TLS connection is deferred
+     * until the first command. Auth and database selection are embedded in the
+     * config and applied automatically by phpredis on first connect.
      *
-     * All keys match the phpredis constructor API exactly (camelCase).
-     * Auth and database are embedded so phpredis applies them automatically
-     * on the first real command — no explicit AUTH / SELECT call needed.
+     * Call ping() on the returned instance to force an immediate connection.
      *
-     * phpredis constructor reference:
+     * phpredis constructor keys (all camelCase):
      *   host           string
      *   port           int
      *   connectTimeout float   seconds
@@ -223,7 +138,7 @@ final class KeyValueConnectionFactory
      *   ssl            array   PHP stream SSL context options (without the outer 'ssl' wrapper)
      *   backoff        array   ['algorithm' => ..., 'base' => ..., 'cap' => ...]
      */
-    private function createLazy(Endpoint $endpoint, ?array $tlsContext, ConnectionParams $params): \Redis
+    private function buildRedis(Endpoint $endpoint, ?array $tlsContext, ConnectionParams $params): \Redis
     {
         $cfg = [
             'host' => $tlsContext !== null ? ('tls://' . $endpoint->host) : $endpoint->host,
@@ -243,7 +158,7 @@ final class KeyValueConnectionFactory
         }
 
         if ($tlsContext !== null) {
-            // Constructor expects the SSL options array directly (no outer 'ssl' wrapper).
+            // Constructor expects the SSL options directly (no outer 'ssl' wrapper).
             $cfg['ssl'] = $tlsContext['ssl'];
         }
 
