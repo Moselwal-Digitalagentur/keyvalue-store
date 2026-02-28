@@ -47,9 +47,27 @@ final class KeyValueBackend extends RedisBackend
 {
     private KeyValueConnectionFactory $factory;
 
-    public function __construct(string $context = '')
+    /**
+     * All raw options passed by CacheManager, stored for use in buildFactoryOptions().
+     * This includes TLS/sentinel/backoff keys that have no setter in RedisBackend.
+     */
+    private array $rawOptions = [];
+
+    /**
+     * Options that RedisBackend (or AbstractBackend) has setters for.
+     * Only these are forwarded to parent::__construct() to avoid the
+     * "Invalid cache backend option" InvalidArgumentException.
+     */
+    private const PARENT_OPTION_KEYS = [
+        'hostname', 'port', 'database', 'password',
+        'compression', 'compressionLevel', 'connectionTimeout',
+        'persistentConnection', 'defaultLifetime',
+    ];
+
+    public function __construct(string $context = '', array $options = [])
     {
-        parent::__construct($context);
+        $this->rawOptions = $options;
+        parent::__construct($context, array_intersect_key($options, array_flip(self::PARENT_OPTION_KEYS)));
         $this->factory = new KeyValueConnectionFactory();
     }
 
@@ -75,12 +93,13 @@ final class KeyValueBackend extends RedisBackend
     }
 
     /**
-     * Map RedisBackend's TYPO3-style properties plus any extra 'options' array
-     * entries into the KeyValueConnectionFactory option schema.
+     * Map RedisBackend's TYPO3-style properties plus rawOptions into the
+     * KeyValueConnectionFactory option schema.
      *
-     * phpredis camelCase keys are primary. TYPO3's AbstractBackend stores the raw
-     * backend options array in $this->options; TLS, Sentinel, and backoff keys must
-     * be provided there and will override the standard RedisBackend properties.
+     * Standard options (hostname, port, database, password, …) are read from
+     * the RedisBackend properties set by parent::__construct() via setters.
+     * TLS, Sentinel, backoff and any other extra keys come from $this->rawOptions
+     * and are merged on top, overriding the defaults where needed.
      */
     private function buildFactoryOptions(): array
     {
@@ -88,8 +107,8 @@ final class KeyValueBackend extends RedisBackend
             'host' => $this->hostname,
             'port' => (int)$this->port,
             'connectTimeout' => (float)$this->connectionTimeout,
-            'readTimeout' => (float)$this->readTimeout,
-            'retryInterval' => (int)$this->retryInterval,
+            'readTimeout' => (float)($this->rawOptions['readTimeout'] ?? $this->rawOptions['read_timeout'] ?? 0.0),
+            'retryInterval' => (int)($this->rawOptions['retryInterval'] ?? $this->rawOptions['retry_interval'] ?? 0),
             'database' => (int)$this->database,
             // Persistent: use the database-specific ID so that different databases
             // get distinct persistent connections.
@@ -102,10 +121,9 @@ final class KeyValueBackend extends RedisBackend
             $opts['auth'] = (string)$this->password;
         }
 
-        if (is_array($this->options ?? null)) {
-            $opts = array_replace($opts, $this->options);
-        }
-
-        return $opts;
+        // Merge all raw options (TLS, sentinel, backoff, and any extra keys).
+        // rawOptions may also contain standard keys like hostname/port that were
+        // already applied via parent setters — they are harmless extras for the factory.
+        return array_replace($opts, $this->rawOptions);
     }
 }
