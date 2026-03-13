@@ -7,7 +7,9 @@ namespace Moselwal\KeyValueStore\Session\Backend;
 use Moselwal\KeyValueStore\Connection\KeyValueConnectionFactory;
 use Redis;
 use RedisException;
-use TYPO3\CMS\Core\Session\Backend\Exception\InvalidArgumentException;
+// TYPO3 11-13 has this exception; TYPO3 14 removed it.
+// Use PHP's built-in \InvalidArgumentException for cross-version compatibility.
+use InvalidArgumentException;
 use TYPO3\CMS\Core\Session\Backend\Exception\SessionNotCreatedException;
 use TYPO3\CMS\Core\Session\Backend\Exception\SessionNotFoundException;
 use TYPO3\CMS\Core\Session\Backend\Exception\SessionNotUpdatedException;
