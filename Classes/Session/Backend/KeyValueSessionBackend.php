@@ -143,6 +143,7 @@ final class KeyValueSessionBackend implements SessionBackendInterface
         try {
             $raw = $this->getRedis()->get($this->key($sessionId));
         } catch (RedisException $e) {
+            $this->resetRedis();
             throw new SessionNotFoundException(
                 'Redis error while reading session "' . $sessionId . '": ' . $e->getMessage(),
                 1730001011,
@@ -169,26 +170,26 @@ final class KeyValueSessionBackend implements SessionBackendInterface
         try {
             $redis = $this->getRedis();
             $sessions = [];
-            $cursor = 0;
+            $cursor = null;
 
             do {
-                $keys = $redis->scan($cursor, ['match' => $this->prefix . '*', 'count' => 100]);
-                if ($keys === false) {
-                    break;
-                }
-                foreach ($keys as $key) {
-                    $raw = $redis->get($key);
-                    if ($raw !== false) {
-                        $record = json_decode((string)$raw, true);
-                        if (is_array($record)) {
-                            $sessions[] = $record;
+                $keys = $redis->scan($cursor, $this->prefix . '*', 100);
+                if ($keys !== false) {
+                    foreach ($keys as $key) {
+                        $raw = $redis->get($key);
+                        if ($raw !== false) {
+                            $record = json_decode((string)$raw, true);
+                            if (is_array($record)) {
+                                $sessions[] = $record;
+                            }
                         }
                     }
                 }
-            } while ($cursor !== 0);
+            } while ($cursor > 0);
 
             return $sessions;
         } catch (RedisException) {
+            $this->resetRedis();
             return [];
         }
     }
@@ -219,6 +220,7 @@ final class KeyValueSessionBackend implements SessionBackendInterface
             }
             return $sessionData;
         } catch (RedisException $e) {
+            $this->resetRedis();
             throw new SessionNotCreatedException(
                 'Redis error while creating session "' . $sessionId . '": ' . $e->getMessage(),
                 1730001021,
@@ -236,51 +238,67 @@ final class KeyValueSessionBackend implements SessionBackendInterface
      */
     public function update(string $sessionId, array $sessionData): array
     {
-        try {
-            $redis = $this->getRedis();
-            $key = $this->key($sessionId);
+        $maxRetries = 2;
 
-            $raw = $redis->get($key);
-            if ($raw === false) {
+        for ($attempt = 0; $attempt < $maxRetries; $attempt++) {
+            try {
+                $redis = $this->getRedis();
+                $key = $this->key($sessionId);
+
+                $redis->watch($key);
+
+                $raw = $redis->get($key);
+                if ($raw === false) {
+                    $redis->unwatch();
+                    throw new SessionNotUpdatedException(
+                        'Session "' . $sessionId . '" not found, cannot update',
+                        1730001030
+                    );
+                }
+
+                $existing = json_decode((string)$raw, true);
+                $record = is_array($existing) ? $existing : [];
+
+                // Merge partial update on top of the existing record.
+                $record = array_merge($record, $sessionData);
+
+                // Interface contract: ses_id is always overwritten; ses_tstamp is updated.
+                $record['ses_id'] = $sessionId;
+                $record['ses_tstamp'] = $GLOBALS['EXEC_TIME'] ?? time();
+
+                // Preserve the existing TTL; fall back to configured lifetime when the
+                // key has no TTL (-1) or has already expired (-2).
+                $ttl = (int)$redis->ttl($key);
+                if ($ttl <= 0) {
+                    $ttl = (int)($this->options['sessionLifetime'] ?? self::DEFAULT_SESSION_LIFETIME);
+                }
+
+                $encoded = json_encode($record, JSON_THROW_ON_ERROR);
+
+                $redis->multi();
+                $redis->setex($key, max(1, $ttl), $encoded);
+                $result = $redis->exec();
+
+                if ($result === false) {
+                    // WATCH detected a concurrent modification; retry
+                    continue;
+                }
+
+                return $record;
+            } catch (RedisException $e) {
+                $this->resetRedis();
                 throw new SessionNotUpdatedException(
-                    'Session "' . $sessionId . '" not found, cannot update',
-                    1730001030
+                    'Redis error while updating session "' . $sessionId . '": ' . $e->getMessage(),
+                    1730001032,
+                    $e
                 );
             }
-
-            $existing = json_decode((string)$raw, true);
-            $record = is_array($existing) ? $existing : [];
-
-            // Merge partial update on top of the existing record.
-            $record = array_merge($record, $sessionData);
-
-            // Interface contract: ses_id is always overwritten; ses_tstamp is updated.
-            $record['ses_id'] = $sessionId;
-            $record['ses_tstamp'] = $GLOBALS['EXEC_TIME'] ?? time();
-
-            // Preserve the existing TTL; fall back to configured lifetime when the
-            // key has no TTL (-1) or has already expired (-2).
-            $ttl = (int)$redis->ttl($key);
-            if ($ttl <= 0) {
-                $ttl = (int)($this->options['sessionLifetime'] ?? self::DEFAULT_SESSION_LIFETIME);
-            }
-
-            $encoded = json_encode($record, JSON_THROW_ON_ERROR);
-            $ok = $redis->setex($key, max(1, $ttl), $encoded);
-            if (!$ok) {
-                throw new SessionNotUpdatedException(
-                    'Could not write updated session "' . $sessionId . '" to Redis',
-                    1730001031
-                );
-            }
-            return $record;
-        } catch (RedisException $e) {
-            throw new SessionNotUpdatedException(
-                'Redis error while updating session "' . $sessionId . '": ' . $e->getMessage(),
-                1730001032,
-                $e
-            );
         }
+
+        throw new SessionNotUpdatedException(
+            'Could not write updated session "' . $sessionId . '" to Redis after ' . $maxRetries . ' attempts due to concurrent modifications',
+            1730001031
+        );
     }
 
     public function remove(string $sessionId): bool
@@ -288,6 +306,7 @@ final class KeyValueSessionBackend implements SessionBackendInterface
         try {
             return $this->getRedis()->del($this->key($sessionId)) > 0;
         } catch (RedisException) {
+            $this->resetRedis();
             return false;
         }
     }
@@ -325,6 +344,7 @@ final class KeyValueSessionBackend implements SessionBackendInterface
 
             return true;
         } catch (RedisException) {
+            $this->resetRedis();
             return false;
         }
     }
@@ -341,12 +361,7 @@ final class KeyValueSessionBackend implements SessionBackendInterface
     private function getRedis(): Redis
     {
         if ($this->redis instanceof Redis) {
-            try {
-                $this->redis->ping();
-                return $this->redis;
-            } catch (RedisException) {
-                $this->redis = null;
-            }
+            return $this->redis;
         }
 
         $factoryOptions = $this->buildFactoryOptions();
@@ -365,6 +380,14 @@ final class KeyValueSessionBackend implements SessionBackendInterface
         }
 
         throw $last ?? new RedisException('Could not connect to Redis');
+    }
+
+    /**
+     * Reset the connection so the next call to getRedis() will reconnect.
+     */
+    private function resetRedis(): void
+    {
+        $this->redis = null;
     }
 
     private function buildFactoryOptions(): array

@@ -59,7 +59,7 @@ final class KeyValueBackend extends RedisBackend
      * "Invalid cache backend option" InvalidArgumentException.
      */
     private const PARENT_OPTION_KEYS = [
-        'hostname', 'port', 'database', 'password',
+        'hostname', 'port', 'database', 'username', 'password',
         'compression', 'compressionLevel', 'connectionTimeout',
         'persistentConnection', 'defaultLifetime',
     ];
@@ -117,8 +117,9 @@ final class KeyValueBackend extends RedisBackend
                 : false,
         ];
 
-        if ((string)$this->password !== '') {
-            $opts['auth'] = (string)$this->password;
+        $authentication = $this->getAuthentication();
+        if ($authentication !== null) {
+            $opts['auth'] = $authentication;
         }
 
         // Merge all raw options (TLS, sentinel, backoff, and any extra keys).
