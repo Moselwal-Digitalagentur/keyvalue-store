@@ -1,0 +1,12 @@
+# Supply Chain Hardening — Kritische Dateien brauchen DevOps Review
+.gitlab-ci.yml    @devops
+composer.json     @devops
+composer.lock     @devops
+policy/           @devops
+
+# CI/CD und Build-Konfiguration
+Makefile          @devops
+*.mk              @devops
+docker/           @devops
+compose*.yaml     @devops
+
