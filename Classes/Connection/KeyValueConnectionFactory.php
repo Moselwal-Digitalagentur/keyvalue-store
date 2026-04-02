@@ -84,7 +84,7 @@ final class KeyValueConnectionFactory
 
     private function resolveEndpoint(array $options, float $connectTimeout): Endpoint
     {
-        if (!empty($options['sentinel'])) {
+        if (isset($options['sentinel']) && (bool)$options['sentinel'] === true) {
             return $this->sentinelResolver->resolveMaster([
                 'sentinel' => true,
                 'sentinel_host' => (string)($options['sentinel_host'] ?? ''),
@@ -166,7 +166,6 @@ final class KeyValueConnectionFactory
             $cfg['backoff'] = $params->backoff;
         }
 
-        /** @phpstan-ignore-next-line */
         return new \Redis($cfg);
     }
 }

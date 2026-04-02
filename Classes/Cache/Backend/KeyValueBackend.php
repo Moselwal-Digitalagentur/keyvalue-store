@@ -137,11 +137,11 @@ final class KeyValueBackend extends RedisBackend
     {
         $opts = [
             'host' => $this->hostname,
-            'port' => (int)$this->port,
+            'port' => $this->port,
             'connectTimeout' => (float)$this->connectionTimeout,
             'readTimeout' => (float)($this->rawOptions['readTimeout'] ?? $this->rawOptions['read_timeout'] ?? 0.0),
             'retryInterval' => (int)($this->rawOptions['retryInterval'] ?? $this->rawOptions['retry_interval'] ?? 0),
-            'database' => (int)$this->database,
+            'database' => $this->database,
             // Persistent: use the database-specific ID so that different databases
             // get distinct persistent connections.
             'persistent' => $this->persistentConnection

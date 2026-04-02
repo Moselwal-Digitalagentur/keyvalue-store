@@ -109,7 +109,7 @@ final class KeyValueSessionBackend implements SessionBackendInterface
 
     public function validateConfiguration(): void
     {
-        if (!empty($this->options['sentinel'])) {
+        if (isset($this->options['sentinel']) && (bool)$this->options['sentinel'] === true) {
             if (trim((string)($this->options['sentinel_host'] ?? '')) === '') {
                 throw new InvalidArgumentException(
                     'Redis sentinel=true but sentinel_host is missing',

@@ -8,6 +8,12 @@
 		"typo3/cms-core": "^14.0",
 		"ext-redis": ">=6.3"
 	},
+	"repositories": [
+		{
+			"type": "composer",
+			"url": "https://gitlab.moselwal.io/api/v4/group/175/-/packages/composer/packages.json"
+		}
+	],
 	"require-dev": {
 		"moselwal/dev": "*",
 		"phpunit/phpunit": "^10.5 || ^11.0",
@@ -27,5 +33,8 @@
 		"typo3/cms": {
 			"extension-key": "keyvalue-store"
 		}
+	},
+	"config": {
+		"allow-plugins": true
 	}
 }

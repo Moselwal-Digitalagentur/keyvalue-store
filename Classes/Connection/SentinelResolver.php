@@ -28,7 +28,7 @@ final class SentinelResolver
      */
     public function resolveMaster(array $options): Endpoint
     {
-        if (empty($options['sentinel'])) {
+        if (!isset($options['sentinel']) || (bool)$options['sentinel'] !== true) {
             throw new \InvalidArgumentException('Sentinel is not enabled in options.');
         }
 
@@ -54,12 +54,12 @@ final class SentinelResolver
             $sentinelConfig['persistent'] = (string)$options['persistent_id'];
         }
 
-        if (!empty($options['sentinel_password'])) {
+        if (isset($options['sentinel_password']) && (string)$options['sentinel_password'] !== '') {
             $sentinelConfig['auth'] = (string)$options['sentinel_password'];
         }
 
         // TLS for the sentinel connection itself (optional).
-        if (!empty($options['tls'])) {
+        if (isset($options['tls']) && (bool)$options['tls'] === true) {
             $tlsContext = $this->tlsContextBuilder->build($options);
             if ($tlsContext !== null) {
                 // Prefix with tls:// so phpredis negotiates TLS.

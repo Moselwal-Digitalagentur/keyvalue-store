@@ -36,7 +36,7 @@ final class KeyValueLockingStrategy implements LockingStrategyInterface, LoggerA
         }
 
         $host = (string)($configuration['host'] ?? $configuration['hostname'] ?? '');
-        if ($host === '' && empty($configuration['sentinel'])) {
+        if ($host === '' && (!isset($configuration['sentinel']) || (bool)$configuration['sentinel'] !== true)) {
             throw new LockCreateException('No host configured for Redis locking.', 1700000002);
         }
 
@@ -45,8 +45,8 @@ final class KeyValueLockingStrategy implements LockingStrategyInterface, LoggerA
         }
 
         $keyPrefix = sha1(($GLOBALS['TYPO3_CONF_VARS']['SYS']['encryptionKey'] ?? 'init') . '_KEYVALUE_LOCKING');
-        $this->name = sprintf('%s:lock:name:%s', $keyPrefix, (string)$subject);
-        $this->mutexName = sprintf('%s:lock:mutex:%s', $keyPrefix, (string)$subject);
+        $this->name = sprintf('%s:lock:name:%s', $keyPrefix, $subject);
+        $this->mutexName = sprintf('%s:lock:mutex:%s', $keyPrefix, $subject);
         $this->value = bin2hex(random_bytes(16));
 
         $this->factory = new KeyValueConnectionFactory();
