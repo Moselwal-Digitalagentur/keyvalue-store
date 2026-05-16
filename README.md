@@ -1,6 +1,6 @@
 # KeyValue Store — TYPO3 Extension
 
-[![TYPO3 11.5–14.0](https://img.shields.io/badge/TYPO3-11.5–14.0-orange.svg)](https://get.typo3.org/)
+[![TYPO3 14](https://img.shields.io/badge/TYPO3-14.x-orange.svg)](https://get.typo3.org/)
 [![PHP 8.2+](https://img.shields.io/badge/PHP-8.2%2B-blue.svg)](https://php.net/)
 [![License: GPL-2.0-or-later](https://img.shields.io/badge/License-GPL--2.0--or--later-green.svg)](https://www.gnu.org/licenses/gpl-2.0.html)
 
@@ -13,7 +13,7 @@ Redis/Valkey integration for TYPO3 providing caching backends, session storage, 
 - **Locking Strategy** — Distributed locking via Redis for multi-server setups
 - **Sentinel Support** — High-availability Redis through Sentinel discovery
 - **TLS/mTLS** — Encrypted connections with mutual TLS certificate support
-- **Multi-Version Support** — Compatible with TYPO3 11.5, 12.4, 13.4, and 14.0
+- **TYPO3 14.x** — getestet auf der aktuellen LTS-Linie
 
 ## Installation
 
@@ -24,7 +24,7 @@ composer require moselwal/keyvalue-store
 ### Requirements
 
 - PHP 8.2+
-- TYPO3 11.5, 12.4, 13.4, or 14.0
+- TYPO3 14.x
 - `ext-redis` >= 6.3 (PHPRedis extension)
 - Redis or Valkey server
 
