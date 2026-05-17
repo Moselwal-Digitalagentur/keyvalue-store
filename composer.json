@@ -4,7 +4,7 @@
 	"description": "KeyValue Store integration for TYPO3 (Redis/Valkey) with PHPRedis >= 6.3, Sentinel and TLS/mTLS.",
 	"license": "GPL-2.0-or-later",
 	"require": {
-		"php": "^8.2",
+		"php": "^8.3",
 		"typo3/cms-core": "^14.0",
 		"ext-redis": ">=6.3"
 	},
@@ -15,8 +15,7 @@
 		}
 	],
 	"require-dev": {
-		"moselwal/dev": "*",
-		"phpunit/phpunit": "^10.5 || ^11.0",
+		"moselwal/dev": "^4.0",
 		"typo3/testing-framework": "^8.0 || ^9.0"
 	},
 	"autoload": {
@@ -35,6 +34,11 @@
 		}
 	},
 	"config": {
-		"allow-plugins": true
+		"allow-plugins": {
+			"typo3/class-alias-loader": true,
+			"typo3/cms-composer-installers": true,
+			"phpstan/extension-installer": true,
+			"sbuerk/typo3-cmscomposerinstallers-testingframework-bridge": true
+		}
 	}
 }
