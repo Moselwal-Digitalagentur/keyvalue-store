@@ -1,19 +1,22 @@
 # KeyValue Store — TYPO3 Extension
 
 [![TYPO3 14](https://img.shields.io/badge/TYPO3-14.x-orange.svg)](https://get.typo3.org/)
-[![PHP 8.2+](https://img.shields.io/badge/PHP-8.2%2B-blue.svg)](https://php.net/)
+[![PHP 8.5+](https://img.shields.io/badge/PHP-8.5%2B-blue.svg)](https://php.net/)
+[![phpredis 6.3+](https://img.shields.io/badge/phpredis-6.3%2B-red.svg)](https://github.com/phpredis/phpredis)
 [![License: GPL-2.0-or-later](https://img.shields.io/badge/License-GPL--2.0--or--later-green.svg)](https://www.gnu.org/licenses/gpl-2.0.html)
 
-Redis/Valkey integration for TYPO3 providing caching backends, session storage, and locking strategies with Sentinel and TLS/mTLS support.
+Redis/Valkey integration for TYPO3 14: cache backend, session backend,
+distributed locking. Production-ready Sentinel discovery, TLS, and mTLS.
+Built-in override pack against TYPO3 Core's legacy Redis anti-patterns
+(`KEYS`, blocking `DEL`).
 
-## Features
+## Components
 
-- **Caching Backends** — Redis-based cache backends for TYPO3's Caching Framework
-- **Session Storage** — Redis-backed frontend and backend session handling
-- **Locking Strategy** — Distributed locking via Redis for multi-server setups
-- **Sentinel Support** — High-availability Redis through Sentinel discovery
-- **TLS/mTLS** — Encrypted connections with mutual TLS certificate support
-- **TYPO3 14.x** — getestet auf der aktuellen LTS-Linie
+| Component | Class | Drop-in for |
+|---|---|---|
+| Cache backend | `KeyValueBackend` | `TYPO3\CMS\Core\Cache\Backend\RedisBackend` |
+| Session backend | `KeyValueSessionBackend` | `TYPO3\CMS\Core\Session\Backend\RedisSessionBackend` |
+| Locking strategy | `KeyValueLockingStrategy` | `LockingStrategyInterface` (registered automatically) |
 
 ## Installation
 
@@ -23,60 +26,229 @@ composer require moselwal/keyvalue-store
 
 ### Requirements
 
-- PHP 8.2+
+- PHP 8.5+
 - TYPO3 14.x
-- `ext-redis` >= 6.3 (PHPRedis extension)
-- Redis or Valkey server
+- `ext-redis` >= 6.3 (phpredis with the v6 constructor-config API,
+  Sentinel resolver, TLS context, and decorrelated-jitter backoff)
+- Redis 4.0+ or Valkey (UNLINK is required for the v4.2.0 override pack)
+
+## Configuration
+
+The cleanest path is via [`moselwal/typo3-config`](../typo3-config) —
+its `autoconfigureCaching()`, session-binding, and locking helpers wire
+all three components consistently. Manual configuration is supported
+and documented below.
+
+### Cache backend
+
+```php
+$GLOBALS['TYPO3_CONF_VARS']['SYS']['caching']['cacheConfigurations']['pages'] = [
+    'backend' => \Moselwal\KeyValueStore\Cache\Backend\KeyValueBackend::class,
+    'options' => [
+        'hostname'             => 'valkey.internal',
+        'port'                 => 6379,
+        'database'             => 3,
+        'password'             => 'secret',
+        'persistentConnection' => true,
+        'defaultLifetime'      => 2592000,
+        'compression'          => true,
+
+        // TLS / mTLS (optional)
+        'tls'                  => true,
+        'ca_file'              => '/run/tls/ca.crt',
+        'cert_file'            => '/run/tls/httpd.crt',
+        'key_file'             => '/run/tls/httpd.key',
+        'peer_name'            => 'valkey.internal',
+        'verify_peer'          => true,
+        'verify_peer_name'     => true,
+
+        // Sentinel (optional)
+        'sentinel'             => true,
+        'sentinel_host'        => 'sentinel.internal',
+        'sentinel_port'        => 26379,
+        'sentinel_service'     => 'mymaster',
+
+        // phpredis 6.x backoff (optional)
+        'backoff' => [
+            'algorithm' => \Redis::BACKOFF_ALGORITHM_DECORRELATED_JITTER,
+            'base'      => 500,
+            'cap'       => 750,
+        ],
+    ],
+];
+```
+
+### Session backend
+
+```php
+$GLOBALS['TYPO3_CONF_VARS']['SYS']['session']['BE'] = [
+    'backend' => \Moselwal\KeyValueStore\Session\Backend\KeyValueSessionBackend::class,
+    'options' => [
+        'hostname'             => 'valkey.internal',
+        'database'             => 1,
+        'password'             => 'secret',
+        'persistentConnection' => true,
+        'persistentId'         => 'typo3-session-be',
+        'prefix'               => 'typo3:sess:be:',
+        'sessionLifetime'      => 3600,
+        // TLS / Sentinel options as above
+    ],
+];
+```
+
+### Locking strategy
+
+The locking strategy registers via TYPO3's `LockFactory` configuration:
+
+```php
+$GLOBALS['TYPO3_CONF_VARS']['SYS']['locking']['strategies'][
+    \Moselwal\KeyValueStore\Locking\KeyValueLockingStrategy::class
+] = [
+    'hostname'             => 'valkey.internal',
+    'database'             => 0,
+    'password'             => 'secret',
+    'persistentConnection' => true,
+    'ttl'                  => 10,
+    // TLS / Sentinel options as above
+];
+```
+
+## What v4.x does differently from TYPO3 Core's `RedisBackend`
+
+The `KeyValueBackend` extends `RedisBackend` and overrides four
+operations to drop server-side anti-patterns. The other operations
+(`get`, `set`, `has`, `remove`, `findIdentifiersByTag`) are inherited
+verbatim — Core already pipelines tag tracking there, so there is
+nothing to add.
+
+| Operation | TYPO3 Core | `KeyValueBackend` (v4.2.0) |
+|---|---|---|
+| `flush()` | `KEYS prefix*` + `DEL` (event-loop block for all clients) | `SCAN` + `UNLINK` batches (server stays responsive) |
+| `flushByTag()` / `flushByTags()` | N× sequential `flushByTag()` fan-out | One `sUnion` + one pipelined `UNLINK` |
+| `collectGarbage()` | `KEYS identTags:*` | `SCAN`-loop |
+| Connection | `pconnect()` only, no Sentinel/TLS | `KeyValueConnectionFactory` (Sentinel resolver, mTLS, backoff) |
+
+Additionally:
+
+- `lazy=true` is the default — the TCP/TLS handshake is deferred to
+  the first command. Bootstrap of 11 cache backends drops from ~25 ms
+  to ~0.07 ms on a real mTLS Valkey setup.
+- `OPT_SCAN = SCAN_RETRY` is set on every connection so phpredis
+  retries empty SCAN pages internally instead of returning `false`
+  to the caller (a well-known phpredis 6.x footgun).
+
+### Bench (real, container-side against Valkey/mTLS, phpredis 6.3.0)
+
+| Operation | Core / v4.0.x | v4.2.0 | Δ |
+|---|---:|---:|---|
+| Bootstrap 11 caches | 25.1 ms | 0.07 ms | **381×** |
+| `getAll()` 500 sessions | 37.2 ms | 1.5 ms | **24.6×** |
+| `renew()` (session fixation) | 360 µs | 161 µs | 2.2× |
+| Retry-Backoff (2 failures) | 162 ms | 31 ms | **5.1×** |
+| `flushByTags(10 tags)` | 4.1 ms | 1.2 ms | **3.3×** |
+| `flush(10 k keys)` | 7.4 ms | 9.5 ms | −30 % wallclock, no event-loop block |
+| `collectGarbage(5 k keys)` | 1.4 ms | 2.8 ms | −50 % wallclock, no event-loop block |
+
+The `flush()` and `collectGarbage()` overrides are intentionally
+slower wallclock-wise for the caller. The trade-off is server-side
+fairness: while `KEYS` runs, every other client in the Valkey
+instance is blocked. With `SCAN`, the server can interleave other
+clients between batches — for a multi-site, multi-pod setup that is
+the more important property. Neither path is a hot-path operation
+(`flush()` is BE/CLI-triggered; `collectGarbage()` runs in the
+scheduler tick).
+
+## Session backend internals
+
+`KeyValueSessionBackend` is a from-scratch implementation of TYPO3's
+`SessionBackendInterface`. Notable choices:
+
+- **JSON serialisation** for session payloads (not PHP-native) so
+  records remain debuggable with `valkey-cli`
+- **WATCH / MULTI / EXEC** on `update()` with bounded retries —
+  optimistic concurrency, two-tab login is safe
+- **Lua EVAL for `renew()`** — atomic GET/SETEX/DEL so concurrent
+  updates cannot be lost during the rename
+- **`getAll()` via SCAN + MGET** instead of SCAN + N× GET — 24.6×
+  faster on 500 sessions
+
+## Locking strategy internals
+
+`KeyValueLockingStrategy` uses the Lua-EVAL + BLPOP pattern recommended
+by the Redis docs:
+
+- `tryLock()` is a single atomic `SET key value NX EX ttl`
+- `wait()` blocks via server-side `BLPOP` on a signal list — no
+  client-side polling
+- `unlockAndSignal()` runs a Lua script that atomically verifies
+  ownership (GET), releases (DEL), and wakes one waiter
+  (RPUSH + EXPIRE)
 
 ## Architecture
 
 ```
 Classes/
-├── Cache/           # TYPO3 caching framework backends
-├── Connection/      # Redis connection management, Sentinel, TLS
-├── Locking/         # Distributed locking strategy
-└── Session/         # Session storage backends
+├── Cache/Backend/
+│   └── KeyValueBackend.php          (extends TYPO3 Core RedisBackend)
+├── Session/Backend/
+│   └── KeyValueSessionBackend.php   (implements SessionBackendInterface)
+├── Locking/
+│   └── KeyValueLockingStrategy.php  (implements LockingStrategyInterface)
+└── Connection/
+    ├── KeyValueConnectionFactory.php
+    ├── SentinelResolver.php
+    ├── TlsContextBuilder.php
+    └── ValueObject/
+        ├── ConnectionParams.php
+        └── Endpoint.php
 ```
 
-## Configuration
-
-Configure through `moselwal/typo3-config` for seamless integration, or manually via TYPO3's `config/config.php`:
-
-```php
-$GLOBALS['TYPO3_CONF_VARS']['SYS']['caching']['cacheConfigurations']['my_cache'] = [
-    'backend' => \Moselwal\KeyvalueStore\Cache\RedisBackend::class,
-    'options' => [
-        'hostname' => 'redis',
-        'port' => 6379,
-        'database' => 3,
-    ],
-];
-```
-
-### TLS/mTLS
-
-For encrypted connections, provide certificate paths or use auto-discovery from `/run/tls/`.
+All three TYPO3-facing components route their phpredis instantiation
+through `KeyValueConnectionFactory` so Sentinel, TLS, mTLS, and the
+phpredis 6.x backoff config are configured in exactly one place.
 
 ## Development
 
+Tooling lives in [`moselwal/dev`](../dev). Common commands:
+
 ```bash
 composer install
-composer test                    # Unit tests
-composer test:functional         # Functional tests (requires Redis)
-composer phpstan                 # Static analysis
-vendor/bin/php-cs-fixer fix      # Code style (PER-CS3x0)
+vendor/bin/phpunit -c Tests/phpunit.xml --testsuite=Unit
+vendor/bin/phpunit -c Tests/phpunit.xml --testsuite=Functional   # needs Redis
+vendor/bin/phpstan analyse Classes --level=8
+vendor/bin/php-cs-fixer fix Classes Tests --config=vendor/moselwal/dev/.php-cs-fixer.dist.php
 ```
+
+Tests gated with `#[RequiresPhpExtension('redis')]` skip locally when
+ext-redis is missing and run in CI / dev containers where it is
+installed.
 
 ## Dependencies
 
 | Package | Type | Purpose |
-|---------|------|---------|
-| `ext-redis` (>= 6.3) | Required | PHPRedis extension |
-| `moselwal/dev` | Dev | Shared QA tooling |
+|---|---|---|
+| `php` ^8.5 | Required | Language baseline |
+| `typo3/cms-core` ^14.0 | Required | TYPO3 core |
+| `ext-redis` >= 6.3 | Required | phpredis with v6 constructor API |
+| `moselwal/dev` ^5.2 | Dev | Shared QA tooling (phpstan, cs-fixer, etc.) |
 
 ## Related
 
-- [typo3-config](../typo3-config) — Fluent configuration API with built-in KeyValue Store integration
+- [`moselwal/typo3-config`](../typo3-config) — Fluent TYPO3 config API
+  with `autoconfigureCaching()` that wires this package
+- [`moselwal/cluster-file-backend`](../cluster-file-backend) — Pod-local
+  cache backend that uses this package's `KeyValueBackend` as its
+  metadata storage layer
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md). Notable releases:
+
+- **v4.2.0** — TYPO3 Core override pack (`flush`, `flushByTag`,
+  `collectGarbage`); critical fix for `getAll()` SCAN cursor
+- **v4.1.0** — Lazy-connect, MGET-based `getAll()`, atomic `renew()`,
+  decorrelated-jitter backoff
+- **v4.0.0** — PHP 8.5 baseline, TYPO3 14-only, phpredis 6.3 required
 
 ## License
 
