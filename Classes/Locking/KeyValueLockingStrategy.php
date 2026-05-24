@@ -35,13 +35,13 @@ final class KeyValueLockingStrategy implements LockingStrategyInterface, LoggerA
             throw new LockCreateException('No configuration for KeyValueLockingStrategy found.', 1700000001);
         }
 
-        $host = (string)($configuration['host'] ?? $configuration['hostname'] ?? '');
-        if ($host === '' && (!isset($configuration['sentinel']) || (bool)$configuration['sentinel'] !== true)) {
+        $host = (string) ($configuration['host'] ?? $configuration['hostname'] ?? '');
+        if ('' === $host && (!isset($configuration['sentinel']) || true !== (bool) $configuration['sentinel'])) {
             throw new LockCreateException('No host configured for Redis locking.', 1700000002);
         }
 
         if (isset($configuration['ttl'])) {
-            $this->ttl = max(1, (int)$configuration['ttl']);
+            $this->ttl = max(1, (int) $configuration['ttl']);
         }
 
         $keyPrefix = sha1(($GLOBALS['TYPO3_CONF_VARS']['SYS']['encryptionKey'] ?? 'init') . '_KEYVALUE_LOCKING');
@@ -61,8 +61,9 @@ final class KeyValueLockingStrategy implements LockingStrategyInterface, LoggerA
     public static function getPriority(): int
     {
         $configuration = $GLOBALS['TYPO3_CONF_VARS']['SYS']['locking']['strategies'][self::class]['options'] ?? null;
+
         return (is_array($configuration) && isset($configuration['priority']))
-            ? (int)$configuration['priority']
+            ? (int) $configuration['priority']
             : self::DEFAULT_PRIORITY;
     }
 
@@ -75,7 +76,7 @@ final class KeyValueLockingStrategy implements LockingStrategyInterface, LoggerA
             throw new LockAcquireException('Insufficient capabilities.', 1700000010);
         }
 
-        $nonBlocking = (bool)($mode & self::LOCK_CAPABILITY_NOBLOCK);
+        $nonBlocking = (bool) ($mode & self::LOCK_CAPABILITY_NOBLOCK);
 
         if ($nonBlocking) {
             if (!$this->isAcquired = $this->tryLock()) {
@@ -99,6 +100,7 @@ final class KeyValueLockingStrategy implements LockingStrategyInterface, LoggerA
         }
         $released = $this->unlockAndSignal();
         $this->isAcquired = false;
+
         return $released;
     }
 
@@ -123,9 +125,10 @@ final class KeyValueLockingStrategy implements LockingStrategyInterface, LoggerA
     private function tryLock(): bool
     {
         try {
-            return (bool)$this->redis->set($this->name, $this->value, ['NX', 'EX' => $this->ttl]);
+            return (bool) $this->redis->set($this->name, $this->value, ['NX', 'EX' => $this->ttl]);
         } catch (\Throwable $e) {
             $this->logger?->critical('Could not acquire lock in Redis', ['exception' => $e]);
+
             return false;
         }
     }
@@ -137,11 +140,13 @@ final class KeyValueLockingStrategy implements LockingStrategyInterface, LoggerA
     private function wait(): ?string
     {
         try {
-            $blockingTo = max(1, (int)$this->redis->ttl($this->name));
+            $blockingTo = max(1, (int) $this->redis->ttl($this->name));
             $result = $this->redis->blPop([$this->mutexName], $blockingTo);
+
             return $result[1] ?? null;
         } catch (\Throwable $e) {
             $this->logger?->critical('Failure while waiting on Redis mutex', ['exception' => $e]);
+
             return null;
         }
     }
@@ -153,17 +158,19 @@ final class KeyValueLockingStrategy implements LockingStrategyInterface, LoggerA
     {
         try {
             $script = <<<'LUA'
-                if redis.call("GET", KEYS[1]) == ARGV[1] then
-                    redis.call("DEL", KEYS[1])
-                    redis.call("RPUSH", KEYS[2], ARGV[1])
-                    redis.call("EXPIRE", KEYS[2], ARGV[2])
-                    return 1
-                end
-                return 0
-            LUA;
-            return (bool)$this->redis->eval($script, [$this->name, $this->mutexName, $this->value, $this->ttl], 2);
+                    if redis.call("GET", KEYS[1]) == ARGV[1] then
+                        redis.call("DEL", KEYS[1])
+                        redis.call("RPUSH", KEYS[2], ARGV[1])
+                        redis.call("EXPIRE", KEYS[2], ARGV[2])
+                        return 1
+                    end
+                    return 0
+                LUA;
+
+            return (bool) $this->redis->eval($script, [$this->name, $this->mutexName, $this->value, $this->ttl], 2);
         } catch (\Throwable $e) {
             $this->logger?->critical('Failure while unlocking in Redis', ['exception' => $e]);
+
             return false;
         }
     }
@@ -176,27 +183,27 @@ final class KeyValueLockingStrategy implements LockingStrategyInterface, LoggerA
     private function mapOptions(array $cfg): array
     {
         $opts = [
-            'host' => (string)($cfg['host'] ?? $cfg['hostname'] ?? ''),
-            'port' => (int)($cfg['port'] ?? 6379),
+            'host' => (string) ($cfg['host'] ?? $cfg['hostname'] ?? ''),
+            'port' => (int) ($cfg['port'] ?? 6379),
             // phpredis camelCase primary, with legacy aliases
-            'connectTimeout' => (float)($cfg['connectTimeout'] ?? $cfg['connectionTimeout'] ?? $cfg['timeout'] ?? 1.0),
-            'readTimeout' => (float)($cfg['readTimeout'] ?? $cfg['read_timeout'] ?? 0.0),
-            'retryInterval' => (int)($cfg['retryInterval'] ?? $cfg['retry_interval'] ?? 0),
-            'database' => (int)($cfg['database'] ?? 0),
+            'connectTimeout' => (float) ($cfg['connectTimeout'] ?? $cfg['connectionTimeout'] ?? $cfg['timeout'] ?? 1.0),
+            'readTimeout' => (float) ($cfg['readTimeout'] ?? $cfg['read_timeout'] ?? 0.0),
+            'retryInterval' => (int) ($cfg['retryInterval'] ?? $cfg['retry_interval'] ?? 0),
+            'database' => (int) ($cfg['database'] ?? 0),
             // Persistent: string ID, true, or false
             'persistent' => $cfg['persistent_id']
                 ?? $cfg['persistentId']
-                ?? (bool)($cfg['persistent'] ?? $cfg['persistentConnection'] ?? true),
+                ?? (bool) ($cfg['persistent'] ?? $cfg['persistentConnection'] ?? true),
         ];
 
         // Auth: phpredis-style 'auth' takes priority over legacy username/password
         if (array_key_exists('auth', $cfg)) {
             $opts['auth'] = $cfg['auth'];
         } else {
-            $password = (string)($cfg['password'] ?? $cfg['authentication'] ?? '');
-            $username = (string)($cfg['username'] ?? '');
-            if ($password !== '') {
-                $opts['auth'] = $username !== '' ? [$username, $password] : $password;
+            $password = (string) ($cfg['password'] ?? $cfg['authentication'] ?? '');
+            $username = (string) ($cfg['username'] ?? '');
+            if ('' !== $password) {
+                $opts['auth'] = '' !== $username ? [$username, $password] : $password;
             }
         }
 

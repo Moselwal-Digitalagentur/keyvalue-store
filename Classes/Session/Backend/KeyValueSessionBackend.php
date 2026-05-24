@@ -6,10 +6,8 @@ namespace Moselwal\KeyValueStore\Session\Backend;
 
 use Moselwal\KeyValueStore\Connection\KeyValueConnectionFactory;
 use Redis;
-use RedisException;
 // TYPO3 11-13 has this exception; TYPO3 14 removed it.
 // Use PHP's built-in \InvalidArgumentException for cross-version compatibility.
-use InvalidArgumentException;
 use TYPO3\CMS\Core\Session\Backend\Exception\SessionNotCreatedException;
 use TYPO3\CMS\Core\Session\Backend\Exception\SessionNotFoundException;
 use TYPO3\CMS\Core\Session\Backend\Exception\SessionNotUpdatedException;
@@ -80,10 +78,26 @@ final class KeyValueSessionBackend implements SessionBackendInterface
     private const DEFAULT_READ_TIMEOUT = 1.0;
     private const DEFAULT_SESSION_LIFETIME = 3600;
 
+    /**
+     * Atomic rename of a session key while preserving TTL. Doing this with
+     * separate GET/SETEX/DEL commands races with concurrent update() writes:
+     * an update landing between our GET and SETEX would be silently
+     * overwritten by the older session data we copied into the new key.
+     */
+    private const RENEW_SCRIPT = <<<'LUA'
+        local val = redis.call('GET', KEYS[1])
+        if not val then return 0 end
+        local ttl = redis.call('TTL', KEYS[1])
+        if ttl <= 0 then ttl = tonumber(ARGV[1]) end
+        redis.call('SETEX', KEYS[2], ttl, val)
+        redis.call('DEL', KEYS[1])
+        return 1
+        LUA;
+
     /** @var array<string,mixed> */
     private array $options = [];
 
-    private ?Redis $redis = null;
+    private ?\Redis $redis = null;
 
     private string $prefix = 'typo3:sess:';
 
@@ -101,7 +115,7 @@ final class KeyValueSessionBackend implements SessionBackendInterface
     public function initialize(string $identifier, array $configuration): void
     {
         $this->options = $configuration;
-        $this->prefix = (string)($configuration['prefix']
+        $this->prefix = (string) ($configuration['prefix']
             ?? ('typo3:sess:' . strtolower($identifier) . ':'));
         $this->redis = null;
         $this->validateConfiguration();
@@ -109,29 +123,23 @@ final class KeyValueSessionBackend implements SessionBackendInterface
 
     public function validateConfiguration(): void
     {
-        if (isset($this->options['sentinel']) && (bool)$this->options['sentinel'] === true) {
-            if (trim((string)($this->options['sentinel_host'] ?? '')) === '') {
-                throw new InvalidArgumentException(
-                    'Redis sentinel=true but sentinel_host is missing',
-                    1730001001
-                );
+        if (isset($this->options['sentinel']) && true === (bool) $this->options['sentinel']) {
+            if ('' === trim((string) ($this->options['sentinel_host'] ?? ''))) {
+                throw new \InvalidArgumentException('Redis sentinel=true but sentinel_host is missing', 1730001001);
             }
-            if (trim((string)($this->options['sentinel_service'] ?? '')) === '') {
-                throw new InvalidArgumentException(
-                    'Redis sentinel=true but sentinel_service is missing',
-                    1730001004
-                );
+            if ('' === trim((string) ($this->options['sentinel_service'] ?? ''))) {
+                throw new \InvalidArgumentException('Redis sentinel=true but sentinel_service is missing', 1730001004);
             }
         } else {
-            $host = trim((string)($this->options['hostname'] ?? $this->options['host'] ?? ''));
-            if ($host === '') {
-                throw new InvalidArgumentException('Redis hostname is missing', 1730001002);
+            $host = trim((string) ($this->options['hostname'] ?? $this->options['host'] ?? ''));
+            if ('' === $host) {
+                throw new \InvalidArgumentException('Redis hostname is missing', 1730001002);
             }
         }
 
-        $db = (int)($this->options['database'] ?? self::DEFAULT_DB);
+        $db = (int) ($this->options['database'] ?? self::DEFAULT_DB);
         if ($db < 0) {
-            throw new InvalidArgumentException('Redis database must be >= 0', 1730001003);
+            throw new \InvalidArgumentException('Redis database must be >= 0', 1730001003);
         }
     }
 
@@ -144,54 +152,61 @@ final class KeyValueSessionBackend implements SessionBackendInterface
     {
         try {
             $raw = $this->getRedis()->get($this->key($sessionId));
-        } catch (RedisException $e) {
+        } catch (\RedisException $e) {
             $this->resetRedis();
-            throw new SessionNotFoundException(
-                'Redis error while reading session "' . $sessionId . '": ' . $e->getMessage(),
-                1730001011,
-                $e
-            );
+            throw new SessionNotFoundException('Redis error while reading session "' . $sessionId . '": ' . $e->getMessage(), 1730001011, $e);
         }
 
-        if ($raw === false) {
-            throw new SessionNotFoundException(
-                'Session "' . $sessionId . '" not found',
-                1730001010
-            );
+        if (false === $raw) {
+            throw new SessionNotFoundException('Session "' . $sessionId . '" not found', 1730001010);
         }
 
-        $record = json_decode((string)$raw, true);
+        $record = json_decode((string) $raw, true);
+
         return is_array($record) ? $record : [];
     }
 
     /**
      * List all sessions as an array of session record arrays.
+     *
+     * Each SCAN page is resolved through a single MGET roundtrip instead of
+     * N individual GETs. The cursor starts at 0 — initialising it to null
+     * caused the `while ($cursor > 0)` guard to short-circuit on the very
+     * first iteration when phpredis did not implicit-cast, silently
+     * truncating the result set after the first 100 keys.
      */
     public function getAll(): array
     {
         try {
             $redis = $this->getRedis();
             $sessions = [];
-            $cursor = null;
+            $cursor = 0;
 
             do {
                 $keys = $redis->scan($cursor, $this->prefix . '*', 100);
-                if ($keys !== false) {
-                    foreach ($keys as $key) {
-                        $raw = $redis->get($key);
-                        if ($raw !== false) {
-                            $record = json_decode((string)$raw, true);
-                            if (is_array($record)) {
-                                $sessions[] = $record;
-                            }
-                        }
+                if (false === $keys || [] === $keys) {
+                    continue;
+                }
+                $values = $redis->mget($keys);
+                if (!is_array($values)) {
+                    continue;
+                }
+                foreach ($values as $raw) {
+                    if (false === $raw || null === $raw) {
+                        // Concurrent expiry between SCAN and MGET.
+                        continue;
+                    }
+                    $record = json_decode((string) $raw, true);
+                    if (is_array($record)) {
+                        $sessions[] = $record;
                     }
                 }
             } while ($cursor > 0);
 
             return $sessions;
-        } catch (RedisException) {
+        } catch (\RedisException) {
             $this->resetRedis();
+
             return [];
         }
     }
@@ -205,7 +220,7 @@ final class KeyValueSessionBackend implements SessionBackendInterface
      */
     public function set(string $sessionId, array $sessionData): array
     {
-        $ttl = max(1, (int)($this->options['sessionLifetime'] ?? self::DEFAULT_SESSION_LIFETIME));
+        $ttl = max(1, (int) ($this->options['sessionLifetime'] ?? self::DEFAULT_SESSION_LIFETIME));
 
         // Interface contract: ses_id is always overwritten; ses_tstamp is updated.
         $sessionData['ses_id'] = $sessionId;
@@ -215,19 +230,13 @@ final class KeyValueSessionBackend implements SessionBackendInterface
             $encoded = json_encode($sessionData, JSON_THROW_ON_ERROR);
             $ok = $this->getRedis()->setex($this->key($sessionId), $ttl, $encoded);
             if (!$ok) {
-                throw new SessionNotCreatedException(
-                    'Could not write session "' . $sessionId . '" to Redis',
-                    1730001020
-                );
+                throw new SessionNotCreatedException('Could not write session "' . $sessionId . '" to Redis', 1730001020);
             }
+
             return $sessionData;
-        } catch (RedisException $e) {
+        } catch (\RedisException $e) {
             $this->resetRedis();
-            throw new SessionNotCreatedException(
-                'Redis error while creating session "' . $sessionId . '": ' . $e->getMessage(),
-                1730001021,
-                $e
-            );
+            throw new SessionNotCreatedException('Redis error while creating session "' . $sessionId . '": ' . $e->getMessage(), 1730001021, $e);
         }
     }
 
@@ -242,7 +251,7 @@ final class KeyValueSessionBackend implements SessionBackendInterface
     {
         $maxRetries = 2;
 
-        for ($attempt = 0; $attempt < $maxRetries; $attempt++) {
+        for ($attempt = 0; $attempt < $maxRetries; ++$attempt) {
             try {
                 $redis = $this->getRedis();
                 $key = $this->key($sessionId);
@@ -250,15 +259,12 @@ final class KeyValueSessionBackend implements SessionBackendInterface
                 $redis->watch($key);
 
                 $raw = $redis->get($key);
-                if ($raw === false) {
+                if (false === $raw) {
                     $redis->unwatch();
-                    throw new SessionNotUpdatedException(
-                        'Session "' . $sessionId . '" not found, cannot update',
-                        1730001030
-                    );
+                    throw new SessionNotUpdatedException('Session "' . $sessionId . '" not found, cannot update', 1730001030);
                 }
 
-                $existing = json_decode((string)$raw, true);
+                $existing = json_decode((string) $raw, true);
                 $record = is_array($existing) ? $existing : [];
 
                 // Merge partial update on top of the existing record.
@@ -270,9 +276,9 @@ final class KeyValueSessionBackend implements SessionBackendInterface
 
                 // Preserve the existing TTL; fall back to configured lifetime when the
                 // key has no TTL (-1) or has already expired (-2).
-                $ttl = (int)$redis->ttl($key);
+                $ttl = (int) $redis->ttl($key);
                 if ($ttl <= 0) {
-                    $ttl = (int)($this->options['sessionLifetime'] ?? self::DEFAULT_SESSION_LIFETIME);
+                    $ttl = (int) ($this->options['sessionLifetime'] ?? self::DEFAULT_SESSION_LIFETIME);
                 }
 
                 $encoded = json_encode($record, JSON_THROW_ON_ERROR);
@@ -281,34 +287,28 @@ final class KeyValueSessionBackend implements SessionBackendInterface
                 $redis->setex($key, max(1, $ttl), $encoded);
                 $result = $redis->exec();
 
-                if ($result === false) {
+                if (false === $result) {
                     // WATCH detected a concurrent modification; retry
                     continue;
                 }
 
                 return $record;
-            } catch (RedisException $e) {
+            } catch (\RedisException $e) {
                 $this->resetRedis();
-                throw new SessionNotUpdatedException(
-                    'Redis error while updating session "' . $sessionId . '": ' . $e->getMessage(),
-                    1730001032,
-                    $e
-                );
+                throw new SessionNotUpdatedException('Redis error while updating session "' . $sessionId . '": ' . $e->getMessage(), 1730001032, $e);
             }
         }
 
-        throw new SessionNotUpdatedException(
-            'Could not write updated session "' . $sessionId . '" to Redis after ' . $maxRetries . ' attempts due to concurrent modifications',
-            1730001031
-        );
+        throw new SessionNotUpdatedException('Could not write updated session "' . $sessionId . '" to Redis after ' . $maxRetries . ' attempts due to concurrent modifications', 1730001031);
     }
 
     public function remove(string $sessionId): bool
     {
         try {
             return $this->getRedis()->del($this->key($sessionId)) > 0;
-        } catch (RedisException) {
+        } catch (\RedisException) {
             $this->resetRedis();
+
             return false;
         }
     }
@@ -321,32 +321,25 @@ final class KeyValueSessionBackend implements SessionBackendInterface
     /**
      * Rename a session key while preserving TTL (session fixation protection).
      * Not part of SessionBackendInterface.
+     *
+     * Implemented as a single EVAL so the read/write/delete sequence is
+     * atomic relative to concurrent update() callers.
      */
     public function renew(string $oldSessionId, string $newSessionId): bool
     {
         try {
             $redis = $this->getRedis();
-            $oldKey = $this->key($oldSessionId);
-            $newKey = $this->key($newSessionId);
+            $fallbackTtl = (int) ($this->options['sessionLifetime'] ?? self::DEFAULT_SESSION_LIFETIME);
+            $result = $redis->eval(
+                self::RENEW_SCRIPT,
+                [$this->key($oldSessionId), $this->key($newSessionId), (string) $fallbackTtl],
+                2,
+            );
 
-            $ttl = (int)$redis->ttl($oldKey);
-            if ($ttl <= 0) {
-                $ttl = (int)($this->options['sessionLifetime'] ?? self::DEFAULT_SESSION_LIFETIME);
-            }
-
-            $raw = $redis->get($oldKey);
-            if ($raw === false) {
-                return false;
-            }
-
-            if (!$redis->setex($newKey, $ttl, (string)$raw)) {
-                return false;
-            }
-            $redis->del($oldKey);
-
-            return true;
-        } catch (RedisException) {
+            return 1 === (int) $result;
+        } catch (\RedisException) {
             $this->resetRedis();
+
             return false;
         }
     }
@@ -360,28 +353,42 @@ final class KeyValueSessionBackend implements SessionBackendInterface
         return $this->prefix . $sessionId;
     }
 
-    private function getRedis(): Redis
+    /**
+     * Connect with up to three attempts. The previous backoff (50/100/150ms)
+     * could block the whole request for ~300ms on a transient Valkey blip
+     * before the SessionNotCreatedException surfaced. We use decorrelated
+     * jitter (10ms base, 100ms cap) instead — same retry count, ~3× faster
+     * fail and less synchronised retry storms across pods.
+     */
+    private function getRedis(): \Redis
     {
-        if ($this->redis instanceof Redis) {
+        if ($this->redis instanceof \Redis) {
             return $this->redis;
         }
 
         $factoryOptions = $this->buildFactoryOptions();
 
         $last = null;
-        for ($i = 0; $i < 3; $i++) {
+        $base = 10_000;
+        $cap = 100_000;
+        $sleep = $base;
+        for ($i = 0; $i < 3; ++$i) {
             try {
                 $this->redis = $this->factory->create($factoryOptions);
                 $this->redis->ping();
+
                 return $this->redis;
-            } catch (RedisException $e) {
+            } catch (\RedisException $e) {
                 $last = $e;
                 $this->redis = null;
-                usleep(50_000 * ($i + 1));
+                if ($i < 2) {
+                    usleep($sleep);
+                    $sleep = min($cap, random_int($base, $sleep * 3));
+                }
             }
         }
 
-        throw $last ?? new RedisException('Could not connect to Redis');
+        throw $last ?? new \RedisException('Could not connect to Redis');
     }
 
     /**
@@ -395,29 +402,29 @@ final class KeyValueSessionBackend implements SessionBackendInterface
     private function buildFactoryOptions(): array
     {
         $opts = [
-            'host' => trim((string)($this->options['hostname'] ?? $this->options['host'] ?? '')),
-            'port' => (int)($this->options['port'] ?? self::DEFAULT_PORT),
-            'connectTimeout' => (float)($this->options['connectTimeout']
+            'host' => trim((string) ($this->options['hostname'] ?? $this->options['host'] ?? '')),
+            'port' => (int) ($this->options['port'] ?? self::DEFAULT_PORT),
+            'connectTimeout' => (float) ($this->options['connectTimeout']
                 ?? $this->options['connectionTimeout']
                 ?? self::DEFAULT_CONNECT_TIMEOUT),
-            'readTimeout' => (float)($this->options['readTimeout'] ?? self::DEFAULT_READ_TIMEOUT),
-            'database' => (int)($this->options['database'] ?? self::DEFAULT_DB),
+            'readTimeout' => (float) ($this->options['readTimeout'] ?? self::DEFAULT_READ_TIMEOUT),
+            'database' => (int) ($this->options['database'] ?? self::DEFAULT_DB),
             'lazy' => true,
         ];
 
-        $persistentConnection = (bool)($this->options['persistentConnection'] ?? false);
-        $persistentId = trim((string)($this->options['persistentId'] ?? ''));
+        $persistentConnection = (bool) ($this->options['persistentConnection'] ?? false);
+        $persistentId = trim((string) ($this->options['persistentId'] ?? ''));
         if ($persistentConnection) {
-            $opts['persistent'] = $persistentId !== '' ? $persistentId : true;
+            $opts['persistent'] = '' !== $persistentId ? $persistentId : true;
         }
 
         if (array_key_exists('auth', $this->options)) {
             $opts['auth'] = $this->options['auth'];
         } else {
-            $password = (string)($this->options['password'] ?? '');
-            $username = (string)($this->options['username'] ?? '');
-            if ($password !== '') {
-                $opts['auth'] = $username !== '' ? [$username, $password] : $password;
+            $password = (string) ($this->options['password'] ?? '');
+            $username = (string) ($this->options['username'] ?? '');
+            if ('' !== $password) {
+                $opts['auth'] = '' !== $username ? [$username, $password] : $password;
             }
         }
 

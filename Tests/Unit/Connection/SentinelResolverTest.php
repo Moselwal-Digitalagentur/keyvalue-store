@@ -115,7 +115,6 @@ final class SentinelResolverTest extends TestCase
         $capturedConfig = null;
 
         $resolver = new class extends SentinelResolver {
-            /** @var array|null */
             public ?array $capturedConfig = null;
 
             public function resolveMaster(array $options): \Moselwal\KeyValueStore\Connection\ValueObject\Endpoint
@@ -125,12 +124,12 @@ final class SentinelResolverTest extends TestCase
                     throw new \InvalidArgumentException('Sentinel is not enabled in options.');
                 }
 
-                $host = (string)($options['sentinel_host'] ?? '');
-                $port = (int)($options['sentinel_port'] ?? 26379);
-                $service = (string)($options['sentinel_service'] ?? '');
-                $connectTimeout = (float)($options['connectTimeout'] ?? $options['timeout'] ?? 1.0);
+                $host = (string) ($options['sentinel_host'] ?? '');
+                $port = (int) ($options['sentinel_port'] ?? 26379);
+                $service = (string) ($options['sentinel_service'] ?? '');
+                $connectTimeout = (float) ($options['connectTimeout'] ?? $options['timeout'] ?? 1.0);
 
-                if ($host === '' || $service === '') {
+                if ('' === $host || '' === $service) {
                     throw new \InvalidArgumentException('Sentinel host and sentinel_service must be set.');
                 }
 
@@ -194,12 +193,12 @@ final class SentinelResolverTest extends TestCase
                     throw new \InvalidArgumentException('Sentinel is not enabled in options.');
                 }
 
-                $host = (string)($options['sentinel_host'] ?? '');
-                $port = (int)($options['sentinel_port'] ?? 26379);
-                $service = (string)($options['sentinel_service'] ?? '');
-                $connectTimeout = (float)($options['connectTimeout'] ?? $options['timeout'] ?? 1.0);
+                $host = (string) ($options['sentinel_host'] ?? '');
+                $port = (int) ($options['sentinel_port'] ?? 26379);
+                $service = (string) ($options['sentinel_service'] ?? '');
+                $connectTimeout = (float) ($options['connectTimeout'] ?? $options['timeout'] ?? 1.0);
 
-                if ($host === '' || $service === '') {
+                if ('' === $host || '' === $service) {
                     throw new \InvalidArgumentException('Sentinel host and sentinel_service must be set.');
                 }
 
@@ -209,12 +208,12 @@ final class SentinelResolverTest extends TestCase
                     'connectTimeout' => $connectTimeout,
                 ];
 
-                if (isset($options['persistent_id']) && (string)$options['persistent_id'] !== '') {
-                    $sentinelConfig['persistent'] = (string)$options['persistent_id'];
+                if (isset($options['persistent_id']) && '' !== (string) $options['persistent_id']) {
+                    $sentinelConfig['persistent'] = (string) $options['persistent_id'];
                 }
 
                 if (!empty($options['sentinel_password'])) {
-                    $sentinelConfig['auth'] = (string)$options['sentinel_password'];
+                    $sentinelConfig['auth'] = (string) $options['sentinel_password'];
                 }
 
                 if (!empty($options['tls'])) {
@@ -222,7 +221,7 @@ final class SentinelResolverTest extends TestCase
                     $ref = new \ReflectionProperty(SentinelResolver::class, 'tlsContextBuilder');
                     $builder = $ref->getValue($this);
                     $tlsContext = $builder->build($options);
-                    if ($tlsContext !== null) {
+                    if (null !== $tlsContext) {
                         $sentinelConfig['host'] = 'tls://' . $host;
                         $sentinelConfig['ssl'] = $tlsContext['ssl'];
                     }

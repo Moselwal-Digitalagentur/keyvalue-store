@@ -21,7 +21,7 @@ final class KeyValueBackendFunctionalTest extends TestCase
     protected function setUp(): void
     {
         $host = getenv('REDIS_HOST') ?: '127.0.0.1';
-        $port = (int)(getenv('REDIS_PORT') ?: 6379);
+        $port = (int) (getenv('REDIS_PORT') ?: 6379);
 
         try {
             $redis = new \Redis();

@@ -6,7 +6,6 @@ namespace Moselwal\KeyValueStore\Tests\Unit\Cache\Backend;
 
 use Moselwal\KeyValueStore\Cache\Backend\KeyValueBackend;
 use Moselwal\KeyValueStore\Connection\KeyValueConnectionFactory;
-use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\RequiresPhpExtension;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -428,6 +427,7 @@ final class KeyValueBackendTest extends TestCase
             ->method('create')
             ->with(self::callback(static function (array $opts) use (&$capturedOptions): bool {
                 $capturedOptions = $opts;
+
                 return true;
             }))
             ->willReturn($redisMock);
@@ -506,7 +506,7 @@ final class KeyValueBackendTest extends TestCase
         $ref = new \ReflectionMethod(KeyValueBackend::class, 'buildFactoryOptions');
 
         self::assertTrue($ref->isPrivate(), 'buildFactoryOptions() must be private');
-        self::assertSame('array', (string)$ref->getReturnType());
+        self::assertSame('array', (string) $ref->getReturnType());
     }
 
     #[Test]
@@ -516,7 +516,7 @@ final class KeyValueBackendTest extends TestCase
         $keys = $ref->getValue();
 
         $expected = [
-            'hostname', 'port', 'database', 'password',
+            'hostname', 'port', 'database', 'username', 'password',
             'compression', 'compressionLevel', 'connectionTimeout',
             'persistentConnection', 'defaultLifetime',
         ];

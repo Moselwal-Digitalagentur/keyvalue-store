@@ -7,7 +7,6 @@ namespace Moselwal\KeyValueStore\Tests\Functional\Session\Backend;
 use Moselwal\KeyValueStore\Session\Backend\KeyValueSessionBackend;
 use PHPUnit\Framework\Attributes\RequiresPhpExtension;
 use PHPUnit\Framework\TestCase;
-use TYPO3\CMS\Core\Session\Backend\Exception\SessionNotCreatedException;
 use TYPO3\CMS\Core\Session\Backend\Exception\SessionNotFoundException;
 use TYPO3\CMS\Core\Session\Backend\Exception\SessionNotUpdatedException;
 
@@ -27,7 +26,7 @@ final class KeyValueSessionBackendFunctionalTest extends TestCase
     protected function setUp(): void
     {
         $host = getenv('REDIS_HOST') ?: '127.0.0.1';
-        $port = (int)(getenv('REDIS_PORT') ?: 6379);
+        $port = (int) (getenv('REDIS_PORT') ?: 6379);
 
         try {
             $this->redis = new \Redis();
@@ -69,10 +68,10 @@ final class KeyValueSessionBackendFunctionalTest extends TestCase
         $cursor = 0;
         do {
             $keys = $this->redis->scan($cursor, ['match' => $this->prefix . '*', 'count' => 100]);
-            if ($keys !== false && count($keys) > 0) {
+            if (false !== $keys && count($keys) > 0) {
                 $this->redis->del($keys);
             }
-        } while ($cursor !== 0);
+        } while (0 !== $cursor);
     }
 
     // -----------------------------------------------------------------------
@@ -197,7 +196,7 @@ final class KeyValueSessionBackendFunctionalTest extends TestCase
         $shortLivedBackend = new KeyValueSessionBackend();
         $shortLivedBackend->initialize('test', [
             'hostname' => getenv('REDIS_HOST') ?: '127.0.0.1',
-            'port' => (int)(getenv('REDIS_PORT') ?: 6379),
+            'port' => (int) (getenv('REDIS_PORT') ?: 6379),
             'database' => 15,
             'sessionLifetime' => 1,
         ]);
@@ -244,12 +243,12 @@ final class KeyValueSessionBackendFunctionalTest extends TestCase
     public function testMultipleConcurrentOperationsWork(): void
     {
         // Create multiple sessions rapidly to exercise connection pooling
-        for ($i = 0; $i < 10; $i++) {
+        for ($i = 0; $i < 10; ++$i) {
             $this->sessionBackend->set('concurrent-' . $i, ['ses_data' => 'data-' . $i]);
         }
 
         // Read them all back
-        for ($i = 0; $i < 10; $i++) {
+        for ($i = 0; $i < 10; ++$i) {
             $result = $this->sessionBackend->get('concurrent-' . $i);
             self::assertSame('data-' . $i, $result['ses_data']);
         }

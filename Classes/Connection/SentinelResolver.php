@@ -28,17 +28,17 @@ final class SentinelResolver
      */
     public function resolveMaster(array $options): Endpoint
     {
-        if (!isset($options['sentinel']) || (bool)$options['sentinel'] !== true) {
+        if (!isset($options['sentinel']) || true !== (bool) $options['sentinel']) {
             throw new \InvalidArgumentException('Sentinel is not enabled in options.');
         }
 
-        $host = (string)($options['sentinel_host'] ?? '');
-        $port = (int)($options['sentinel_port'] ?? 26379);
-        $service = (string)($options['sentinel_service'] ?? '');
+        $host = (string) ($options['sentinel_host'] ?? '');
+        $port = (int) ($options['sentinel_port'] ?? 26379);
+        $service = (string) ($options['sentinel_service'] ?? '');
         // Accept both camelCase (primary) and the legacy 'timeout' alias.
-        $connectTimeout = (float)($options['connectTimeout'] ?? $options['timeout'] ?? 1.0);
+        $connectTimeout = (float) ($options['connectTimeout'] ?? $options['timeout'] ?? 1.0);
 
-        if ($host === '' || $service === '') {
+        if ('' === $host || '' === $service) {
             throw new \InvalidArgumentException('Sentinel host and sentinel_service must be set.');
         }
 
@@ -50,18 +50,18 @@ final class SentinelResolver
         ];
 
         // Only set persistent when an explicit ID is supplied.
-        if (isset($options['persistent_id']) && (string)$options['persistent_id'] !== '') {
-            $sentinelConfig['persistent'] = (string)$options['persistent_id'];
+        if (isset($options['persistent_id']) && '' !== (string) $options['persistent_id']) {
+            $sentinelConfig['persistent'] = (string) $options['persistent_id'];
         }
 
-        if (isset($options['sentinel_password']) && (string)$options['sentinel_password'] !== '') {
-            $sentinelConfig['auth'] = (string)$options['sentinel_password'];
+        if (isset($options['sentinel_password']) && '' !== (string) $options['sentinel_password']) {
+            $sentinelConfig['auth'] = (string) $options['sentinel_password'];
         }
 
         // TLS for the sentinel connection itself (optional).
-        if (isset($options['tls']) && (bool)$options['tls'] === true) {
+        if (isset($options['tls']) && true === (bool) $options['tls']) {
             $tlsContext = $this->tlsContextBuilder->build($options);
-            if ($tlsContext !== null) {
+            if (null !== $tlsContext) {
                 // Prefix with tls:// so phpredis negotiates TLS.
                 $sentinelConfig['host'] = 'tls://' . $host;
                 // RedisSentinel constructor: ssl key without outer wrapper, like Redis.
@@ -74,11 +74,9 @@ final class SentinelResolver
 
         $addr = $sentinel->getMasterAddrByName($service);
         if (!is_array($addr) || count($addr) < 2) {
-            throw new \RuntimeException(
-                sprintf('Could not resolve master "%s" via sentinel getMasterAddrByName().', $service)
-            );
+            throw new \RuntimeException(sprintf('Could not resolve master "%s" via sentinel getMasterAddrByName().', $service));
         }
 
-        return new Endpoint((string)$addr[0], (int)$addr[1], $connectTimeout);
+        return new Endpoint((string) $addr[0], (int) $addr[1], $connectTimeout);
     }
 }

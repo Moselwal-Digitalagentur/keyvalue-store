@@ -24,7 +24,7 @@ final class KeyValueLockingStrategyFunctionalTest extends TestCase
     protected function setUp(): void
     {
         $host = getenv('REDIS_HOST') ?: '127.0.0.1';
-        $port = (int)(getenv('REDIS_PORT') ?: 6379);
+        $port = (int) (getenv('REDIS_PORT') ?: 6379);
 
         try {
             $redis = new \Redis();
@@ -50,7 +50,7 @@ final class KeyValueLockingStrategyFunctionalTest extends TestCase
 
     protected function tearDown(): void
     {
-        if ($this->originalGlobals !== null) {
+        if (null !== $this->originalGlobals) {
             $GLOBALS['TYPO3_CONF_VARS'] = $this->originalGlobals;
         } else {
             unset($GLOBALS['TYPO3_CONF_VARS']);

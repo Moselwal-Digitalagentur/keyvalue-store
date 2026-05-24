@@ -7,6 +7,7 @@ namespace Moselwal\KeyValueStore\Tests\Unit\Session\Backend;
 use Moselwal\KeyValueStore\Session\Backend\KeyValueSessionBackend;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+
 // TYPO3 14 removed this class — use PHP's built-in \InvalidArgumentException
 // The source code will be updated to throw \InvalidArgumentException instead
 

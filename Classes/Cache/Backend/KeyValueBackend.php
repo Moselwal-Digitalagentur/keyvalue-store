@@ -65,41 +65,14 @@ final class KeyValueBackend extends RedisBackend
     ];
 
     /**
-     * Constructor compatibility shim for TYPO3 11-13 and TYPO3 14.
-     *
-     * TYPO3 11-13: CacheManager passes (string $context, array $options)
-     * TYPO3 14:    CacheManager passes (array $options) — $context removed
-     *
-     * Detection: if first argument is an array → v14 mode; if string → v11-13 mode.
-     * The parent call is dispatched based on the actual parent constructor signature
-     * to ensure compatibility regardless of which TYPO3 version is installed.
+     * TYPO3 14 constructor: CacheManager passes the options array directly.
+     * Earlier TYPO3 versions are no longer supported (composer.json: ^14.0).
      */
-    public function __construct(string|array $contextOrOptions = '', array $options = [])
+    public function __construct(array $options = [])
     {
-        if (is_array($contextOrOptions)) {
-            // TYPO3 14 call pattern: first arg is $options
-            $options = $contextOrOptions;
-            $context = '';
-        } else {
-            // TYPO3 11-13 call pattern: first arg is $context string
-            $context = $contextOrOptions;
-        }
-
         $this->rawOptions = $options;
         $filteredOptions = array_intersect_key($options, array_flip(self::PARENT_OPTION_KEYS));
-
-        // Detect parent constructor signature: TYPO3 14 removed the $context parameter.
-        $parentRef = new \ReflectionMethod(parent::class, '__construct');
-        $firstParam = $parentRef->getParameters()[0] ?? null;
-        $parentAcceptsContext = $firstParam !== null
-            && ((string)$firstParam->getType() === 'string' || $firstParam->getName() === 'context');
-
-        if ($parentAcceptsContext) {
-            parent::__construct($context, $filteredOptions);
-        } else {
-            parent::__construct($filteredOptions);
-        }
-
+        parent::__construct($filteredOptions);
         $this->factory = new KeyValueConnectionFactory();
     }
 
@@ -114,13 +87,9 @@ final class KeyValueBackend extends RedisBackend
         try {
             $this->redis = $this->factory->create($this->buildFactoryOptions());
             $this->connected = true;
-        } catch (\RedisException | \InvalidArgumentException $e) {
+        } catch (\RedisException|\InvalidArgumentException $e) {
             $this->connected = false;
-            throw new Exception(
-                'KeyValueBackend could not connect to Redis: ' . $e->getMessage(),
-                1700100001,
-                $e
-            );
+            throw new Exception('KeyValueBackend could not connect to Redis: ' . $e->getMessage(), 1700100001, $e);
         }
     }
 
@@ -138,19 +107,27 @@ final class KeyValueBackend extends RedisBackend
         $opts = [
             'host' => $this->hostname,
             'port' => $this->port,
-            'connectTimeout' => (float)$this->connectionTimeout,
-            'readTimeout' => (float)($this->rawOptions['readTimeout'] ?? $this->rawOptions['read_timeout'] ?? 0.0),
-            'retryInterval' => (int)($this->rawOptions['retryInterval'] ?? $this->rawOptions['retry_interval'] ?? 0),
+            'connectTimeout' => (float) $this->connectionTimeout,
+            'readTimeout' => (float) ($this->rawOptions['readTimeout'] ?? $this->rawOptions['read_timeout'] ?? 0.0),
+            'retryInterval' => (int) ($this->rawOptions['retryInterval'] ?? $this->rawOptions['retry_interval'] ?? 0),
             'database' => $this->database,
             // Persistent: use the database-specific ID so that different databases
             // get distinct persistent connections.
             'persistent' => $this->persistentConnection
-                ? ('typo3-cache-' . (string)$this->database)
+                ? ('typo3-cache-' . (string) $this->database)
                 : false,
+            // Defer the TCP/TLS handshake to the first command. TYPO3 boots
+            // every configured cache backend eagerly, but most requests only
+            // touch a handful of them — paying 11× ping-roundtrips at
+            // bootstrap (and the full TLS handshake on the first warm
+            // request after a worker reload) is pure overhead. phpredis
+            // applies AUTH/SELECT on first connect, so correctness is
+            // unaffected; only the timing of the network IO moves.
+            'lazy' => true,
         ];
 
         $authentication = $this->getAuthentication();
-        if ($authentication !== null) {
+        if (null !== $authentication) {
             $opts['auth'] = $authentication;
         }
 

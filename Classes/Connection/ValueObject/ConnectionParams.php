@@ -25,7 +25,7 @@ final class ConnectionParams
      *                                          string (explicit persistent ID)
      * @param array|null        $backoff        phpredis: backoff — reconnection backoff config, e.g.
      *                                          ['algorithm' => Redis::BACKOFF_ALGORITHM_DECORRELATED_JITTER,
-     *                                           'base' => 500, 'cap' => 750]
+     *                                          'base' => 500, 'cap' => 750]
      */
     public function __construct(
         public readonly float $connectTimeout,
@@ -56,10 +56,10 @@ final class ConnectionParams
     public static function fromOptions(array $options): self
     {
         return new self(
-            connectTimeout: (float)($options['connectTimeout'] ?? $options['timeout'] ?? 1.0),
-            readTimeout: (float)($options['readTimeout'] ?? $options['read_timeout'] ?? 0.0),
-            retryInterval: (int)($options['retryInterval'] ?? $options['retry_interval'] ?? 0),
-            database: (int)($options['database'] ?? 0),
+            connectTimeout: (float) ($options['connectTimeout'] ?? $options['timeout'] ?? 1.0),
+            readTimeout: (float) ($options['readTimeout'] ?? $options['read_timeout'] ?? 0.0),
+            retryInterval: (int) ($options['retryInterval'] ?? $options['retry_interval'] ?? 0),
+            database: (int) ($options['database'] ?? 0),
             auth: self::resolveAuth($options),
             persistent: self::resolvePersistent($options),
             backoff: isset($options['backoff']) && is_array($options['backoff'])
@@ -82,14 +82,14 @@ final class ConnectionParams
             return $options['auth']; // phpredis-native: string|array|null
         }
 
-        $password = isset($options['password']) ? (string)$options['password'] : '';
-        if ($password === '') {
+        $password = isset($options['password']) ? (string) $options['password'] : '';
+        if ('' === $password) {
             return null;
         }
 
-        $username = isset($options['username']) ? (string)$options['username'] : '';
+        $username = isset($options['username']) ? (string) $options['username'] : '';
 
-        return $username !== '' ? [$username, $password] : $password;
+        return '' !== $username ? [$username, $password] : $password;
     }
 
     /**
@@ -105,15 +105,16 @@ final class ConnectionParams
     {
         if (array_key_exists('persistent', $options)) {
             $v = $options['persistent'];
-            if (is_string($v) && $v !== '') {
+            if (is_string($v) && '' !== $v) {
                 return $v;  // explicit persistent ID
             }
-            return (bool)$v; // true = auto-ID, false = off
+
+            return (bool) $v; // true = auto-ID, false = off
         }
 
         // Legacy: separate persistent_id key
-        if (isset($options['persistent_id']) && (string)$options['persistent_id'] !== '') {
-            return (string)$options['persistent_id'];
+        if (isset($options['persistent_id']) && '' !== (string) $options['persistent_id']) {
+            return (string) $options['persistent_id'];
         }
 
         return false;

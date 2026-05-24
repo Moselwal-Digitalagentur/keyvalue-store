@@ -65,7 +65,7 @@ final class KeyValueConnectionFactory
         $params = ConnectionParams::fromOptions($options);
         $tlsContext = $this->tlsContextBuilder->build($options);
         $endpoint = $this->resolveEndpoint($options, $params->connectTimeout);
-        $lazy = (bool)($options['lazy'] ?? false);
+        $lazy = (bool) ($options['lazy'] ?? false);
 
         $redis = $this->buildRedis($endpoint, $tlsContext, $params);
 
@@ -84,12 +84,12 @@ final class KeyValueConnectionFactory
 
     private function resolveEndpoint(array $options, float $connectTimeout): Endpoint
     {
-        if (isset($options['sentinel']) && (bool)$options['sentinel'] === true) {
+        if (isset($options['sentinel']) && true === (bool) $options['sentinel']) {
             return $this->sentinelResolver->resolveMaster([
                 'sentinel' => true,
-                'sentinel_host' => (string)($options['sentinel_host'] ?? ''),
-                'sentinel_port' => (int)($options['sentinel_port'] ?? 26379),
-                'sentinel_service' => (string)($options['sentinel_service'] ?? ''),
+                'sentinel_host' => (string) ($options['sentinel_host'] ?? ''),
+                'sentinel_port' => (int) ($options['sentinel_port'] ?? 26379),
+                'sentinel_service' => (string) ($options['sentinel_service'] ?? ''),
                 'sentinel_password' => $options['sentinel_password'] ?? null,
                 'connectTimeout' => $connectTimeout,
                 'persistent_id' => $options['sentinel_persistent_id'] ?? null,
@@ -105,12 +105,12 @@ final class KeyValueConnectionFactory
             ]);
         }
 
-        $host = (string)($options['host'] ?? '');
-        if ($host === '') {
+        $host = (string) ($options['host'] ?? '');
+        if ('' === $host) {
             throw new \InvalidArgumentException('Redis host must be set.');
         }
 
-        return new Endpoint($host, (int)($options['port'] ?? 6379), $connectTimeout);
+        return new Endpoint($host, (int) ($options['port'] ?? 6379), $connectTimeout);
     }
 
     // -------------------------------------------------------------------------
@@ -141,7 +141,7 @@ final class KeyValueConnectionFactory
     private function buildRedis(Endpoint $endpoint, ?array $tlsContext, ConnectionParams $params): \Redis
     {
         $cfg = [
-            'host' => $tlsContext !== null ? ('tls://' . $endpoint->host) : $endpoint->host,
+            'host' => null !== $tlsContext ? ('tls://' . $endpoint->host) : $endpoint->host,
             'port' => $endpoint->port,
             'connectTimeout' => $params->connectTimeout,
             'readTimeout' => $params->readTimeout,
@@ -149,20 +149,20 @@ final class KeyValueConnectionFactory
             'database' => $params->database,
         ];
 
-        if ($params->auth !== null) {
+        if (null !== $params->auth) {
             $cfg['auth'] = $params->auth;
         }
 
-        if ($params->persistent !== false) {
+        if (false !== $params->persistent) {
             $cfg['persistent'] = $params->persistent; // string ID or true
         }
 
-        if ($tlsContext !== null) {
+        if (null !== $tlsContext) {
             // Constructor expects the SSL options directly (no outer 'ssl' wrapper).
             $cfg['ssl'] = $tlsContext['ssl'];
         }
 
-        if ($params->backoff !== null) {
+        if (null !== $params->backoff) {
             $cfg['backoff'] = $params->backoff;
         }
 
