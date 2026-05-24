@@ -169,18 +169,25 @@ final class KeyValueSessionBackend implements SessionBackendInterface
     /**
      * List all sessions as an array of session record arrays.
      *
-     * Each SCAN page is resolved through a single MGET roundtrip instead of
-     * N individual GETs. The cursor starts at 0 — initialising it to null
-     * caused the `while ($cursor > 0)` guard to short-circuit on the very
-     * first iteration when phpredis did not implicit-cast, silently
-     * truncating the result set after the first 100 keys.
+     * Each SCAN page is resolved through a single MGET roundtrip instead
+     * of N individual GETs.
+     *
+     * **phpredis 6.x SCAN semantics** — easy to get wrong:
+     *   - The cursor MUST start as `null`. phpredis 6.3 treats `int 0`
+     *     as "iteration finished" and returns `false` immediately without
+     *     ever talking to the server. `null` triggers the real first
+     *     request; phpredis updates the by-ref cursor on every subsequent
+     *     call.
+     *   - Exit the loop when the cursor becomes `0` (phpredis signals
+     *     end-of-iteration that way), not when it falls below 1 —
+     *     `!== 0` keeps us safe against any string-typed cursor variants.
      */
     public function getAll(): array
     {
         try {
             $redis = $this->getRedis();
             $sessions = [];
-            $cursor = 0;
+            $cursor = null;
 
             do {
                 $keys = $redis->scan($cursor, $this->prefix . '*', 100);
@@ -201,7 +208,7 @@ final class KeyValueSessionBackend implements SessionBackendInterface
                         $sessions[] = $record;
                     }
                 }
-            } while ($cursor > 0);
+            } while (0 !== (int) $cursor);
 
             return $sessions;
         } catch (\RedisException) {
