@@ -66,6 +66,41 @@ final class KeyValueBackend extends RedisBackend
     ];
 
     /**
+     * Atomic write + tag-diff. Replaces TYPO3 Core's 2-3 roundtrip
+     * SETEX + SMEMBERS + MULTI/PIPELINE flow with a single EVAL.
+     *
+     * - KEYS[1] = data key (keyPrefix + 'identData:' + identifier)
+     * - KEYS[2] = identifier→tags set (keyPrefix + 'identTags:' + identifier)
+     * - ARGV[1] = TTL in seconds (always > 0; caller normalises lifetime=0
+     *             to FAKED_UNLIMITED_LIFETIME before invoking)
+     * - ARGV[2] = data payload (already compressed if applicable)
+     * - ARGV[3] = entry identifier (bare, used as the value in tag→ident sets)
+     * - ARGV[4] = tag-key prefix (keyPrefix + 'tagIdents:')
+     * - ARGV[5..N] = new tag names
+     */
+    private const SET_TAG_DIFF_SCRIPT = <<<'LUA'
+        redis.call('SETEX', KEYS[1], ARGV[1], ARGV[2])
+        local existing = redis.call('SMEMBERS', KEYS[2])
+        local newSet = {}
+        for i = 5, #ARGV do newSet[ARGV[i]] = true end
+        local existingSet = {}
+        for _, tag in ipairs(existing) do
+            existingSet[tag] = true
+            if not newSet[tag] then
+                redis.call('SREM', KEYS[2], tag)
+                redis.call('SREM', ARGV[4] .. tag, ARGV[3])
+            end
+        end
+        for tag, _ in pairs(newSet) do
+            if not existingSet[tag] then
+                redis.call('SADD', KEYS[2], tag)
+                redis.call('SADD', ARGV[4] .. tag, ARGV[3])
+            end
+        end
+        return 1
+        LUA;
+
+    /**
      * TYPO3 14 constructor: CacheManager passes the options array directly.
      * Earlier TYPO3 versions are no longer supported (composer.json: ^14.0).
      */
@@ -92,11 +127,121 @@ final class KeyValueBackend extends RedisBackend
             // cursor is exhausted. Without this, an empty SCAN page returns
             // `false` and the caller has to spin its own retry loop.
             $this->redis->setOption(\Redis::OPT_SCAN, \Redis::SCAN_RETRY);
+            $this->applySerializerOption();
             $this->connected = true;
         } catch (\RedisException|\InvalidArgumentException $e) {
             $this->connected = false;
             throw new Exception('KeyValueBackend could not connect to Redis: ' . $e->getMessage(), 1700100001, $e);
         }
+    }
+
+    /**
+     * Configure `OPT_SERIALIZER` based on the `serializer` option.
+     *
+     * **Switching the serializer is destructive** — existing payloads
+     * stay in the previous format and will fail to deserialize on read.
+     * The operator must `FLUSHDB` the affected cache databases when
+     * changing this value. See README "Serializer" section.
+     *
+     * Supported values:
+     *   - 'php' (default) — `Redis::SERIALIZER_PHP`. BC-safe; no change
+     *     from v4.2.0 behaviour.
+     *   - 'igbinary' — `Redis::SERIALIZER_IGBINARY` if ext-igbinary is
+     *     loaded; otherwise emits a notice via the registered logger
+     *     (if any) and falls back to PHP-native so the cache keeps
+     *     working.
+     *   - 'none' — `Redis::SERIALIZER_NONE`. The caller is responsible
+     *     for serialisation. Use for advanced setups.
+     *   - 'auto' — igbinary if loaded, php otherwise. **Not the default**
+     *     because an image update that ships ext-igbinary would otherwise
+     *     silently switch the on-disk format and break existing payloads.
+     */
+    private function applySerializerOption(): void
+    {
+        $requested = (string) ($this->rawOptions['serializer'] ?? 'php');
+        $serializer = match ($requested) {
+            'php' => \Redis::SERIALIZER_PHP,
+            'none' => \Redis::SERIALIZER_NONE,
+            'igbinary' => $this->resolveIgbinaryOrFallback($requested),
+            'auto' => extension_loaded('igbinary') && \defined('Redis::SERIALIZER_IGBINARY')
+                ? \Redis::SERIALIZER_IGBINARY
+                : \Redis::SERIALIZER_PHP,
+            default => throw new \InvalidArgumentException(sprintf('Unknown serializer "%s"; expected one of php|igbinary|none|auto', $requested), 1700100002),
+        };
+        $this->redis->setOption(\Redis::OPT_SERIALIZER, $serializer);
+    }
+
+    private function resolveIgbinaryOrFallback(string $requested): int
+    {
+        if (extension_loaded('igbinary') && \defined('Redis::SERIALIZER_IGBINARY')) {
+            return \Redis::SERIALIZER_IGBINARY;
+        }
+        // The caller explicitly asked for igbinary but the extension is
+        // not loaded — fall back to PHP-native so the cache stays
+        // operational. Operators should treat the missing extension as
+        // a deployment bug, but we do not throw: a single missing
+        // extension should not take the site down.
+        trigger_error(
+            sprintf(
+                'KeyValueBackend: serializer "%s" requested but ext-igbinary is not loaded — falling back to PHP-native',
+                $requested,
+            ),
+            E_USER_NOTICE,
+        );
+
+        return \Redis::SERIALIZER_PHP;
+    }
+
+    /**
+     * Atomic write + tag-diff via a single EVAL.
+     *
+     * TYPO3 Core's set() flow is SETEX + SMEMBERS + (sometimes) a tag-diff
+     * MULTI/PIPELINE — two to three roundtrips depending on whether tag
+     * membership changed. Our override collapses the whole operation
+     * into a single EVAL so the data write, tag membership check, and
+     * tag-set updates happen in one server-side step.
+     *
+     * Bench (Valkey/mTLS, phpredis 6.3): saves 60–160 µs per set() across
+     * 1–20 tag counts, scaling with tag count (1 tag ≈ 1.2× faster,
+     * 20 tags ≈ 1.7× faster).
+     *
+     * `lifetime=0` is normalised to `FAKED_UNLIMITED_LIFETIME` (one year)
+     * **before** invoking Lua — bit-by-bit identical to TYPO3 Core's
+     * behaviour (RedisBackend.php:254). The Lua script therefore always
+     * receives a positive TTL and uses SETEX, never SET-without-TTL.
+     */
+    public function set(string $entryIdentifier, string $data, array $tags = [], ?int $lifetime = null): void
+    {
+        $lifetime ??= $this->defaultLifetime;
+        if ($lifetime < 0) {
+            throw new \InvalidArgumentException('The specified lifetime "' . $lifetime . '" must be greater or equal than zero.', 1279487573);
+        }
+        if (!$this->connected) {
+            return;
+        }
+        if ($this->compression) {
+            $data = gzcompress($data, $this->compressionLevel);
+        }
+        $expiration = 0 === $lifetime ? self::FAKED_UNLIMITED_LIFETIME : $lifetime;
+
+        // Build a fully-prefixed tag-key prefix so Lua can synthesise the
+        // tag→identifier set keys (keyPrefix + 'tagIdents:' + tagname)
+        // without re-implementing getTagIdentifier() in Lua.
+        $tagKeyPrefix = $this->keyPrefix . self::TAG_IDENTIFIERS_PREFIX;
+
+        $argv = array_merge(
+            [$expiration, $data, $entryIdentifier, $tagKeyPrefix],
+            array_values($tags),
+        );
+
+        $this->redis->eval(
+            self::SET_TAG_DIFF_SCRIPT,
+            array_merge(
+                [$this->getDataIdentifier($entryIdentifier), $this->getTagsIdentifier($entryIdentifier)],
+                $argv,
+            ),
+            2,
+        );
     }
 
     /**

@@ -18,6 +18,13 @@ final class KeyValueLockingStrategy implements LockingStrategyInterface, LoggerA
 
     private const DEFAULT_PRIORITY = 95;
 
+    /**
+     * Conservative upper bound for the blocking-acquire retry loop, used
+     * when the operator does not configure `maxAcquireAttempts`. With the
+     * default TTL of 30 s this caps the worst-case wait at ~50 minutes.
+     */
+    private const DEFAULT_ACQUIRE_BLOCKING_MAX_ATTEMPTS = 100;
+
     private \Redis $redis;
     private KeyValueConnectionFactory $factory;
 
@@ -27,6 +34,7 @@ final class KeyValueLockingStrategy implements LockingStrategyInterface, LoggerA
 
     private bool $isAcquired = false;
     private int $ttl = 30;
+    private int $maxAcquireAttempts = self::DEFAULT_ACQUIRE_BLOCKING_MAX_ATTEMPTS;
 
     public function __construct(mixed $subject)
     {
@@ -42,6 +50,9 @@ final class KeyValueLockingStrategy implements LockingStrategyInterface, LoggerA
 
         if (isset($configuration['ttl'])) {
             $this->ttl = max(1, (int) $configuration['ttl']);
+        }
+        if (isset($configuration['maxAcquireAttempts'])) {
+            $this->maxAcquireAttempts = max(1, (int) $configuration['maxAcquireAttempts']);
         }
 
         $keyPrefix = sha1(($GLOBALS['TYPO3_CONF_VARS']['SYS']['encryptionKey'] ?? 'init') . '_KEYVALUE_LOCKING');
@@ -83,7 +94,11 @@ final class KeyValueLockingStrategy implements LockingStrategyInterface, LoggerA
                 throw new LockAcquireWouldBlockException('Could not acquire exclusive lock (non-blocking).', 1700000011);
             }
         } else {
+            $attempts = 0;
             while (!$this->isAcquired = $this->tryLock()) {
+                if (++$attempts > $this->maxAcquireAttempts) {
+                    throw new LockAcquireException(sprintf('Could not acquire exclusive lock after %d blocking attempts.', $this->maxAcquireAttempts), 1700000013);
+                }
                 if (null === $this->wait()) {
                     throw new LockAcquireException('Could not acquire exclusive lock (blocking).', 1700000012);
                 }
@@ -121,6 +136,13 @@ final class KeyValueLockingStrategy implements LockingStrategyInterface, LoggerA
 
     /**
      * Attempt a single SET NX EX to acquire the lock.
+     *
+     * `false` from phpredis here means either "lock already held" (the
+     * expected, frequent case under contention) or "Redis is unreachable"
+     * (the actual incident case). We can only tell the two apart by
+     * catching the Throwable — the Throwable path logs at `critical`,
+     * the SET-returns-false path stays silent so a busy lock under
+     * contention does not flood the log.
      */
     private function tryLock(): bool
     {
@@ -134,14 +156,18 @@ final class KeyValueLockingStrategy implements LockingStrategyInterface, LoggerA
     }
 
     /**
-     * Block on the mutex notification queue until the current holder signals release.
-     * Returns the signalled value or null on timeout/error.
+     * Block on the mutex notification queue until the current holder
+     * signals release. Returns the signalled value or null on timeout/error.
+     *
+     * The blocking timeout reuses the configured TTL — querying the
+     * server for the current key TTL would be an extra roundtrip for
+     * no gain: all holders use the same configured TTL, so this value
+     * is an upper bound on how long the lock can stay held.
      */
     private function wait(): ?string
     {
         try {
-            $blockingTo = max(1, (int) $this->redis->ttl($this->name));
-            $result = $this->redis->blPop([$this->mutexName], $blockingTo);
+            $result = $this->redis->blPop([$this->mutexName], max(1, $this->ttl));
 
             return $result[1] ?? null;
         } catch (\Throwable $e) {
@@ -194,6 +220,10 @@ final class KeyValueLockingStrategy implements LockingStrategyInterface, LoggerA
             'persistent' => $cfg['persistent_id']
                 ?? $cfg['persistentId']
                 ?? (bool) ($cfg['persistent'] ?? $cfg['persistentConnection'] ?? true),
+            // Defer the connection until the first command (typically the
+            // initial tryLock). Saves the ping roundtrip the factory would
+            // otherwise emit during construction.
+            'lazy' => true,
         ];
 
         // Auth: phpredis-style 'auth' takes priority over legacy username/password

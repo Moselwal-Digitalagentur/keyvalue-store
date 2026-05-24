@@ -121,12 +121,14 @@ operations to drop server-side anti-patterns. The other operations
 verbatim — Core already pipelines tag tracking there, so there is
 nothing to add.
 
-| Operation | TYPO3 Core | `KeyValueBackend` (v4.2.0) |
+| Operation | TYPO3 Core | `KeyValueBackend` (v4.3.0) |
 |---|---|---|
+| `set()` | SETEX + SMEMBERS + (optional MULTI/PIPELINE) tag diff | Single Lua `EVAL` (atomic, 1 roundtrip) |
 | `flush()` | `KEYS prefix*` + `DEL` (event-loop block for all clients) | `SCAN` + `UNLINK` batches (server stays responsive) |
 | `flushByTag()` / `flushByTags()` | N× sequential `flushByTag()` fan-out | One `sUnion` + one pipelined `UNLINK` |
 | `collectGarbage()` | `KEYS identTags:*` | `SCAN`-loop |
 | Connection | `pconnect()` only, no Sentinel/TLS | `KeyValueConnectionFactory` (Sentinel resolver, mTLS, backoff) |
+| Serializer | hard-coded PHP-native | configurable: `php` / `igbinary` / `none` / `auto` |
 
 Additionally:
 
@@ -139,12 +141,16 @@ Additionally:
 
 ### Bench (real, container-side against Valkey/mTLS, phpredis 6.3.0)
 
-| Operation | Core / v4.0.x | v4.2.0 | Δ |
+| Operation | Core / v4.0.x | v4.3.0 | Δ |
 |---|---:|---:|---|
 | Bootstrap 11 caches | 25.1 ms | 0.07 ms | **381×** |
 | `getAll()` 500 sessions | 37.2 ms | 1.5 ms | **24.6×** |
 | `renew()` (session fixation) | 360 µs | 161 µs | 2.2× |
 | Retry-Backoff (2 failures) | 162 ms | 31 ms | **5.1×** |
+| `set()` 1 tag | 353 µs | 264 µs | 1.3× |
+| `set()` 5 tags | 421 µs | 266 µs | **1.6×** |
+| `set()` 10 tags | 421 µs | 286 µs | 1.5× |
+| `set()` 20 tags | 582 µs | 299 µs | **1.9×** |
 | `flushByTags(10 tags)` | 4.1 ms | 1.2 ms | **3.3×** |
 | `flush(10 k keys)` | 7.4 ms | 9.5 ms | −30 % wallclock, no event-loop block |
 | `collectGarbage(5 k keys)` | 1.4 ms | 2.8 ms | −50 % wallclock, no event-loop block |
@@ -240,10 +246,65 @@ installed.
   cache backend that uses this package's `KeyValueBackend` as its
   metadata storage layer
 
+## Serializer
+
+`KeyValueBackend` defaults to PHP-native serialization (`SERIALIZER_PHP`).
+Operators can opt into other phpredis serializers via the `serializer`
+option:
+
+```php
+'options' => [
+    'serializer' => 'php' | 'igbinary' | 'none' | 'auto',
+    // …
+],
+```
+
+| Value | Behaviour |
+|---|---|
+| `'php'` *(default)* | PHP-native, BC-safe, identical to v4.2.0 |
+| `'igbinary'` | igbinary when `ext-igbinary` is loaded; falls back to PHP-native with a notice otherwise |
+| `'none'` | No phpredis-layer serialization; the caller serializes |
+| `'auto'` | igbinary if loaded, php otherwise (**not the default**, see below) |
+
+**⚠️ Switching the serializer requires a full cache flush of all
+affected cache databases.** Existing payloads stay in the previous
+format and will fail to deserialize on read. Recommended deploy
+sequence:
+
+```bash
+# 1. Flush each affected Valkey DB
+valkey-cli -n 3 FLUSHDB    # pages
+valkey-cli -n 4 FLUSHDB    # hash
+# … repeat for each cache DB
+
+# 2. Restart workers so connections re-initialise with the new option
+
+# 3. Deploy the new typo3-config with the serializer change
+```
+
+**When `auto` is the wrong default**: an image update that ships
+`ext-igbinary` would silently switch the on-disk format for any cache
+that uses `auto` — and on the next read of an old PHP-serialised
+payload, the cache would throw. Pinning the value explicitly (`'php'`
+or `'igbinary'`) makes the contract observable.
+
+**When `igbinary` is worth it**: only for caches storing deeply nested
+arrays/objects (e.g. extbase ClassSchema, fluid template reflection).
+For string-content caches (rendered pages, large text blobs) or flat
+key/value caches (`hash`, `imagesizes`) the igbinary encoder overhead
+dominates the marginal payload-size win — keep the default. See
+[CHANGELOG.md](CHANGELOG.md) for measured numbers.
+
+The session backend (`KeyValueSessionBackend`) uses JSON internally
+for debuggability via `valkey-cli` — this option has no effect there.
+
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md). Notable releases:
 
+- **v4.3.0** — Lua-EVAL `set()` (1.3×–1.9× faster); `serializer` opt-in;
+  KeyValueLockingStrategy audit (configurable `maxAcquireAttempts`,
+  lazy connect, TTL-cache in `wait()`, log-level differentiation)
 - **v4.2.0** — TYPO3 Core override pack (`flush`, `flushByTag`,
   `collectGarbage`); critical fix for `getAll()` SCAN cursor
 - **v4.1.0** — Lazy-connect, MGET-based `getAll()`, atomic `renew()`,

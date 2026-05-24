@@ -4,6 +4,87 @@ All notable changes to `moselwal/keyvalue-store` are documented in this file.
 The format is loosely based on Keep-a-Changelog; this package follows
 SemVer (breaking changes bump the major).
 
+## [4.3.0] - 2026-05-24
+
+### Performance
+
+- **`KeyValueBackend::set()` override** with a single Lua `EVAL`.
+  Replaces TYPO3 Core's 2–3-roundtrip flow (SETEX + SMEMBERS + optional
+  MULTI/PIPELINE for tag diff) with one atomic server-side operation.
+  Bench against live Valkey/mTLS with a 2 KB payload:
+
+  | Tag count | Core | v4.3.0 | Saved |
+  |---|---:|---:|---:|
+  | 1 tag | 353 µs | 264 µs | **+88 µs (1.3×)** |
+  | 5 tags | 421 µs | 266 µs | **+155 µs (1.6×)** |
+  | 10 tags | 421 µs | 286 µs | **+134 µs (1.5×)** |
+  | 20 tags | 582 µs | 299 µs | **+284 µs (1.9×)** |
+
+  Behaviour-identical to Core for the `lifetime=0` case: we normalise
+  to `FAKED_UNLIMITED_LIFETIME` (one year) **before** invoking Lua —
+  the script therefore always receives a positive TTL and uses SETEX,
+  never SET-without-TTL.
+
+- **Opt-in `serializer` option** for `KeyValueBackend`:
+
+  ```php
+  'serializer' => 'php' | 'igbinary' | 'none' | 'auto'
+  ```
+
+  - `'php'` (**default**) — `Redis::SERIALIZER_PHP`. **BC-safe**, identical
+    to v4.2.0 on-disk format.
+  - `'igbinary'` — `Redis::SERIALIZER_IGBINARY` if ext-igbinary is loaded;
+    otherwise emits a notice and falls back to PHP-native so the cache
+    stays operational.
+  - `'none'` — `Redis::SERIALIZER_NONE`. Caller handles serialisation.
+  - `'auto'` — igbinary if loaded, php otherwise. **Not the default**:
+    an image update that ships ext-igbinary would otherwise silently
+    switch the on-disk format and break existing payloads.
+
+  **⚠️ Switching the serializer requires a full cache flush of all
+  affected cache databases.** Existing payloads stay in the previous
+  format and will fail to deserialize. Recommended deploy sequence:
+  (1) flush cache DBs, (2) restart workers, (3) deploy new config.
+
+  **When igbinary actually helps** (measured against live Valkey/mTLS):
+
+  | Cache shape | PHP serializer | igbinary | Delta |
+  |---|---:|---:|---|
+  | Small (~100 B, flat) | 102 µs | 179 µs | **−77 µs slower** |
+  | Medium nested | 96 µs | 96 µs | parity |
+  | Large string-blob (16 KB) | 119 µs | 122 µs | parity |
+  | Extbase deep (50 props) | 119 µs | 110 µs | +9 µs |
+
+  Bottom line: igbinary is **only** worthwhile for caches with deeply
+  nested arrays/objects (e.g. extbase ClassSchema, fluid template
+  reflection). For string-content caches (rendered pages, large text
+  blobs) or flat key/value caches (`hash`, `imagesizes`) the overhead
+  of igbinary's encoder dominates the marginal payload-size win — keep
+  `serializer = 'php'` (the default) for those.
+
+### KeyValueLockingStrategy audit fixes
+
+- **`wait()` no longer issues a TTL roundtrip** — reuses the configured
+  TTL directly. The TTL was always set to `$this->ttl` by every lock
+  holder, so asking the server was a roundtrip for no gain.
+- **`acquire()` blocking-loop honours a configurable cap** —
+  `maxAcquireAttempts` config option (default 100). Operators with
+  short lock TTLs (e.g. 2 s) can lower it; setups with long-running
+  protected operations can raise it. Prevents the previous unbounded
+  blocking loop on Redis outages.
+- **Logger levels differentiated** — `tryLock()` only logs at `critical`
+  when a Throwable is actually caught (real exception path). The
+  expected SET-returns-false case (lock contended) stays silent so a
+  busy lock under contention does not flood the log.
+- **Locking connection is lazy** — `KeyValueConnectionFactory` is now
+  invoked with `lazy=true`; the eager ping at lock-strategy construction
+  is gone.
+
+### Fixed
+
+- `set()` override's signature stays identical to TYPO3 Core's `array $tags`
+  type-hint (intentionally untyped, for interface contravariance).
+
 ## [4.2.0] - 2026-05-24
 
 ### Fixed (CRITICAL)
