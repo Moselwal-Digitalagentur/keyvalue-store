@@ -27,8 +27,42 @@ use PHPUnit\Framework\TestCase;
 final class KeyValueBackendSerializerTest extends TestCase
 {
     #[Test]
-    public function defaultSerializerIsPhpNative(): void
+    public function defaultLeavesSerializerUntouchedSoTypo3OwnsEncoding(): void
     {
+        // No 'serializer' option set → applySerializerOption() must NOT
+        // call setOption(OPT_SERIALIZER, …) at all. TYPO3's VariableFrontend
+        // does its own serialize()/unserialize(); double-encoding via
+        // phpredis would corrupt all reads. This is the v4.3.1 hotfix.
+        $redis = $this->createMock(\Redis::class);
+        $redis->expects(self::never())
+            ->method('setOption')
+            ->with(\Redis::OPT_SERIALIZER, self::anything());
+
+        $this->invokeApplySerializerOption($redis, []);
+    }
+
+    #[Test]
+    public function explicitNoneSetsSerializerNone(): void
+    {
+        $redis = $this->createMock(\Redis::class);
+        $redis->expects(self::atLeastOnce())
+            ->method('setOption')
+            ->willReturnCallback(function (int $option, mixed $value): bool {
+                if (\Redis::OPT_SERIALIZER === $option) {
+                    self::assertSame(\Redis::SERIALIZER_NONE, $value);
+                }
+
+                return true;
+            });
+
+        $this->invokeApplySerializerOption($redis, ['serializer' => 'none']);
+    }
+
+    #[Test]
+    public function explicitPhpSetsSerializerPhp(): void
+    {
+        // For advanced setups where the frontend does NOT serialise itself.
+        // Setting 'php' is an explicit opt-in; not the default.
         $redis = $this->createMock(\Redis::class);
         $redis->expects(self::atLeastOnce())
             ->method('setOption')
@@ -40,7 +74,7 @@ final class KeyValueBackendSerializerTest extends TestCase
                 return true;
             });
 
-        $this->invokeApplySerializerOption($redis, []);
+        $this->invokeApplySerializerOption($redis, ['serializer' => 'php']);
     }
 
     #[Test]
@@ -65,23 +99,6 @@ final class KeyValueBackendSerializerTest extends TestCase
     }
 
     #[Test]
-    public function noneSerializerDisablesPhpredisLayer(): void
-    {
-        $redis = $this->createMock(\Redis::class);
-        $redis->expects(self::atLeastOnce())
-            ->method('setOption')
-            ->willReturnCallback(function (int $option, mixed $value): bool {
-                if (\Redis::OPT_SERIALIZER === $option) {
-                    self::assertSame(\Redis::SERIALIZER_NONE, $value);
-                }
-
-                return true;
-            });
-
-        $this->invokeApplySerializerOption($redis, ['serializer' => 'none']);
-    }
-
-    #[Test]
     public function unknownSerializerValueThrows(): void
     {
         $redis = $this->createMock(\Redis::class);
@@ -92,11 +109,14 @@ final class KeyValueBackendSerializerTest extends TestCase
     }
 
     #[Test]
-    public function autoSelectsIgbinaryIfAvailable(): void
+    public function autoSelectsIgbinaryIfAvailableOtherwiseNone(): void
     {
+        // 'auto' fallback is SERIALIZER_NONE (not PHP) so the wire format
+        // stays identical to the default-unset case when ext-igbinary is
+        // missing — TYPO3 keeps owning the serialisation layer.
         $expected = extension_loaded('igbinary') && \defined('Redis::SERIALIZER_IGBINARY')
             ? \Redis::SERIALIZER_IGBINARY
-            : \Redis::SERIALIZER_PHP;
+            : \Redis::SERIALIZER_NONE;
 
         $redis = $this->createMock(\Redis::class);
         $redis->expects(self::atLeastOnce())

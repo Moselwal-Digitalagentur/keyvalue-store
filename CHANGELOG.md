@@ -4,6 +4,65 @@ All notable changes to `moselwal/keyvalue-store` are documented in this file.
 The format is loosely based on Keep-a-Changelog; this package follows
 SemVer (breaking changes bump the major).
 
+## [4.3.1] - 2026-05-24 — P0 HOTFIX
+
+### Fixed (CRITICAL)
+
+- **`serializer` default no longer activates phpredis OPT_SERIALIZER**.
+  v4.3.0 set `Redis::SERIALIZER_PHP` whenever no explicit option was
+  given. This silently double-encoded every cache write (TYPO3
+  VariableFrontend already calls `serialize()` before passing the
+  payload to the backend; phpredis then wrapped that string in another
+  `serialize()` call). On read, phpredis `unserialize()`d once,
+  TYPO3 `unserialize()`d a second time — and the second call received
+  an `array` instead of a string, throwing:
+
+  ```
+  TypeError: unserialize(): Argument #1 ($data) must be of type string, array given
+    in TYPO3\CMS\Core\Cache\Frontend\VariableFrontend::get()
+  ```
+
+  Symptoms: BE login renders 500 (FluidTemplateCache write fails),
+  FE pages render 500 (RootlineUtility cache read fails), CFB
+  metadata writes throw "ClusterFileBackend write failed; see log
+  for details" (the wrapped error is the unserialize TypeError).
+
+  v4.3.1 fix: `applySerializerOption()` is a no-op when no `serializer`
+  option is set, leaving phpredis at its default `SERIALIZER_NONE`.
+  This restores v4.2.0 wire behaviour exactly. The `serializer`
+  option is now strictly opt-in: setting it explicitly activates
+  phpredis-side serialisation; not setting it lets TYPO3 own the
+  encoding.
+
+- **`'auto'` fallback** when ext-igbinary is missing now resolves to
+  `SERIALIZER_NONE` (was `SERIALIZER_PHP` in v4.3.0). Same reasoning:
+  the wire format must stay identical to the default-unset case so
+  TYPO3-owned encoding keeps working.
+
+- **`'igbinary'` fallback** when ext-igbinary is missing now resolves
+  to `SERIALIZER_NONE` (was `SERIALIZER_PHP`). Operators who explicitly
+  request igbinary on a host without the extension get a notice + a
+  format-stable fallback instead of a silently broken cache.
+
+### Deploy notes
+
+Sites that ran any traffic on v4.3.0 have double-encoded payloads in
+their Valkey cache databases. After deploying v4.3.1 those entries
+will surface as `unserialize()` TypeErrors on the next read. **Flush
+the affected cache databases** as part of the deploy:
+
+```bash
+# DBs depend on the typo3-config wiring; the moselwal default is 3-11.
+for db in 3 4 5 6 7 8 9 10 11; do
+    valkey-cli ... -n $db FLUSHDB
+done
+```
+
+Or via TYPO3 (after restart):
+```bash
+docker exec moselwal-websites-httpd bin/typo3 cache:flush --group all
+```
+
 ## [4.3.0] - 2026-05-24
 
 ### Performance

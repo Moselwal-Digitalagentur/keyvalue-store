@@ -138,34 +138,52 @@ final class KeyValueBackend extends RedisBackend
     /**
      * Configure `OPT_SERIALIZER` based on the `serializer` option.
      *
+     * **Default is "no phpredis-side serialisation"** — TYPO3's
+     * VariableFrontend already calls `serialize()` / `unserialize()`
+     * before/after invoking the backend. Activating phpredis's
+     * OPT_SERIALIZER on top would double-encode on write (Lua-EVAL
+     * paths skip OPT_SERIALIZER for ARGV, but inherited get() honours
+     * it) and double-decode on read, breaking the cache with
+     * `unserialize(): Argument #1 ($data) must be of type string, array given`.
+     *
+     * Operators only need to set `serializer` when they want phpredis
+     * to handle the serialisation layer itself (e.g. for igbinary's
+     * compact binary format on caches with deeply nested arrays).
+     *
      * **Switching the serializer is destructive** — existing payloads
      * stay in the previous format and will fail to deserialize on read.
      * The operator must `FLUSHDB` the affected cache databases when
      * changing this value. See README "Serializer" section.
      *
-     * Supported values:
-     *   - 'php' (default) — `Redis::SERIALIZER_PHP`. BC-safe; no change
-     *     from v4.2.0 behaviour.
+     * Supported values when set:
+     *   - (default, unset) — `Redis::SERIALIZER_NONE`. TYPO3 owns
+     *     serialisation. **BC-safe; identical to v4.2.0 wire behaviour.**
+     *   - 'none' — alias for the default (explicit form).
+     *   - 'php' — `Redis::SERIALIZER_PHP`. Lets phpredis do the
+     *     serialisation. Only safe when the calling frontend does NOT
+     *     also serialise (rare; advanced setups).
      *   - 'igbinary' — `Redis::SERIALIZER_IGBINARY` if ext-igbinary is
-     *     loaded; otherwise emits a notice via the registered logger
-     *     (if any) and falls back to PHP-native so the cache keeps
-     *     working.
-     *   - 'none' — `Redis::SERIALIZER_NONE`. The caller is responsible
-     *     for serialisation. Use for advanced setups.
-     *   - 'auto' — igbinary if loaded, php otherwise. **Not the default**
+     *     loaded; otherwise emits a notice and falls back to NONE so
+     *     the cache keeps working.
+     *   - 'auto' — igbinary if loaded, otherwise NONE. **Not the default**
      *     because an image update that ships ext-igbinary would otherwise
      *     silently switch the on-disk format and break existing payloads.
      */
     private function applySerializerOption(): void
     {
-        $requested = (string) ($this->rawOptions['serializer'] ?? 'php');
-        $serializer = match ($requested) {
-            'php' => \Redis::SERIALIZER_PHP,
+        $requested = $this->rawOptions['serializer'] ?? null;
+        if (null === $requested) {
+            // No explicit option set → leave phpredis at SERIALIZER_NONE
+            // (its default). TYPO3 handles encoding above us.
+            return;
+        }
+        $serializer = match ((string) $requested) {
             'none' => \Redis::SERIALIZER_NONE,
-            'igbinary' => $this->resolveIgbinaryOrFallback($requested),
+            'php' => \Redis::SERIALIZER_PHP,
+            'igbinary' => $this->resolveIgbinaryOrFallback((string) $requested),
             'auto' => extension_loaded('igbinary') && \defined('Redis::SERIALIZER_IGBINARY')
                 ? \Redis::SERIALIZER_IGBINARY
-                : \Redis::SERIALIZER_PHP,
+                : \Redis::SERIALIZER_NONE,
             default => throw new \InvalidArgumentException(sprintf('Unknown serializer "%s"; expected one of php|igbinary|none|auto', $requested), 1700100002),
         };
         $this->redis->setOption(\Redis::OPT_SERIALIZER, $serializer);
@@ -177,19 +195,20 @@ final class KeyValueBackend extends RedisBackend
             return \Redis::SERIALIZER_IGBINARY;
         }
         // The caller explicitly asked for igbinary but the extension is
-        // not loaded — fall back to PHP-native so the cache stays
-        // operational. Operators should treat the missing extension as
-        // a deployment bug, but we do not throw: a single missing
-        // extension should not take the site down.
+        // not loaded — fall back to SERIALIZER_NONE so TYPO3 keeps owning
+        // the serialisation layer (same wire format as v4.2.0). Operators
+        // should treat the missing extension as a deployment bug; we do
+        // not throw because a single missing extension should not take
+        // the site down.
         trigger_error(
             sprintf(
-                'KeyValueBackend: serializer "%s" requested but ext-igbinary is not loaded — falling back to PHP-native',
+                'KeyValueBackend: serializer "%s" requested but ext-igbinary is not loaded — falling back to SERIALIZER_NONE',
                 $requested,
             ),
             E_USER_NOTICE,
         );
 
-        return \Redis::SERIALIZER_PHP;
+        return \Redis::SERIALIZER_NONE;
     }
 
     /**
