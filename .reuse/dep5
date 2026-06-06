@@ -1,0 +1,16 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: keyvalue-store
+Upstream-Contact: Moselwal Digitalagentur GmbH <support@moselwal.io>
+Source: https://gitlab.moselwal.io/development/moselwal/keyvalue-store
+
+Files: *
+Copyright: 2026 Moselwal Digitalagentur GmbH, Kai Ole Hartwig
+License: MIT
+
+Files: .specify/* .claude/*
+Copyright: 2026 Moselwal Digitalagentur GmbH, Kai Ole Hartwig
+License: MIT
+
+Files: composer.json composer.lock
+Copyright: 2026 Moselwal Digitalagentur GmbH, Kai Ole Hartwig
+License: MIT

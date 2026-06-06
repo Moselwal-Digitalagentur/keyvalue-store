@@ -1,43 +1,61 @@
 {
-	"name": "moselwal/keyvalue-store",
-	"type": "typo3-cms-extension",
-	"description": "KeyValue Store integration for TYPO3 (Redis/Valkey) with PHPRedis >= 6.3, Sentinel and TLS/mTLS.",
-	"license": "GPL-2.0-or-later",
-	"require": {
-		"php": "^8.5",
-		"typo3/cms-core": "^14.0",
-		"ext-redis": ">=6.3"
-	},
-	"repositories": [
-		{
-			"type": "composer",
-			"url": "https://gitlab.moselwal.io/api/v4/group/175/-/packages/composer/packages.json"
-		}
-	],
-	"require-dev": {
-		"moselwal/dev": "^5.2"
-	},
-	"autoload": {
-		"psr-4": {
-			"Moselwal\\KeyValueStore\\": "Classes/"
-		}
-	},
-	"autoload-dev": {
-		"psr-4": {
-			"Moselwal\\KeyValueStore\\Tests\\": "Tests/"
-		}
-	},
-	"extra": {
-		"typo3/cms": {
-			"extension-key": "keyvalue-store"
-		}
-	},
-	"config": {
-		"allow-plugins": {
-			"typo3/class-alias-loader": true,
-			"typo3/cms-composer-installers": true,
-			"phpstan/extension-installer": true,
-			"sbuerk/typo3-cmscomposerinstallers-testingframework-bridge": true
-		}
-	}
+    "name": "moselwal/keyvalue-store",
+    "type": "typo3-cms-extension",
+    "description": "KeyValue Store integration for TYPO3 (Redis/Valkey) with PHPRedis >= 6.3, Sentinel and TLS/mTLS.",
+    "license": "MIT",
+    "keywords": ["typo3", "redis", "valkey", "keyvalue", "cache", "session", "lock"],
+    "authors": [
+        {
+            "name": "Moselwal Digitalagentur GmbH",
+            "email": "support@moselwal.io",
+            "homepage": "https://moselwal.io",
+            "role": "Maintainer"
+        },
+        {
+            "name": "Kai Ole Hartwig",
+            "email": "o.hartwig@moselwal.de",
+            "role": "Developer"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/Moselwal-Digitalagentur/keyvalue-store/issues",
+        "source": "https://github.com/Moselwal-Digitalagentur/keyvalue-store"
+    },
+    "repositories": [
+        {
+            "type": "composer",
+            "url": "https://gitlab.moselwal.io/api/v4/group/175/-/packages/composer/packages.json"
+        }
+    ],
+    "require": {
+        "php": "^8.5",
+        "typo3/cms-core": "^14.0",
+        "ext-redis": ">=6.3"
+    },
+    "require-dev": {
+        "moselwal/dev": "^5.2"
+    },
+    "autoload": {
+        "psr-4": {
+            "Moselwal\\KeyValueStore\\": "Classes/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Moselwal\\KeyValueStore\\Tests\\": "Tests/"
+        }
+    },
+    "extra": {
+        "typo3/cms": {
+            "extension-key": "keyvalue-store"
+        }
+    },
+    "config": {
+        "allow-plugins": {
+            "typo3/class-alias-loader": true,
+            "typo3/cms-composer-installers": true,
+            "phpstan/extension-installer": true,
+            "sbuerk/typo3-cmscomposerinstallers-testingframework-bridge": true
+        }
+    }
 }
