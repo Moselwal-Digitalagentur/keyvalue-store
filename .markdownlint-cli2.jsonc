@@ -1,0 +1,27 @@
+// SPDX-FileCopyrightText: 2026 Moselwal Digitalagentur GmbH, Kai Ole Hartwig
+// SPDX-License-Identifier: MIT
+{
+  "config": {
+    "MD013": false,
+    "MD025": false,
+    "MD024": false,
+    "MD034": false,
+    "MD060": false,
+    "MD031": false,
+    "MD022": false,
+    "MD032": false
+  },
+  "ignores": [
+    ".claude/**",
+    ".specify/**",
+    "specs/**",
+    "CLAUDE.md",
+    "vendor/**",
+    ".composer/**",
+    "node_modules/**",
+    ".Build/**",
+    "var/**",
+    "CHANGELOG.md",
+    ".gitlab/**"
+  ]
+}
