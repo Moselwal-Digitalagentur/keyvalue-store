@@ -1,6 +1,6 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: keyvalue-store
-Upstream-Contact: Moselwal Digitalagentur GmbH <support@moselwal.io>
+Upstream-Contact: Moselwal Digitalagentur GmbH <support@moselwal.de>
 Source: https://gitlab.moselwal.io/development/moselwal/keyvalue-store
 
 Files: *
