@@ -3,7 +3,15 @@
     "type": "typo3-cms-extension",
     "description": "KeyValue Store integration for TYPO3 (Redis/Valkey) with PHPRedis >= 6.3, Sentinel and TLS/mTLS.",
     "license": "MIT",
-    "keywords": ["typo3", "redis", "valkey", "keyvalue", "cache", "session", "lock"],
+    "keywords": [
+        "typo3",
+        "redis",
+        "valkey",
+        "keyvalue",
+        "cache",
+        "session",
+        "lock"
+    ],
     "authors": [
         {
             "name": "Moselwal Digitalagentur GmbH",
@@ -17,6 +25,7 @@
             "role": "Developer"
         }
     ],
+    "homepage": "https://moselwal.de",
     "support": {
         "issues": "https://github.com/Moselwal-Digitalagentur/keyvalue-store/issues",
         "source": "https://github.com/Moselwal-Digitalagentur/keyvalue-store"
