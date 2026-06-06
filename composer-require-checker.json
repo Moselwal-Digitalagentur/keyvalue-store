@@ -1,0 +1,15 @@
+{
+  "symbol-whitelist": [
+    "Psr\\\\Log\\\\LoggerInterface",
+    "Psr\\\\Log\\\\NullLogger",
+    "Symfony\\\\Component\\\\Console\\\\Attribute\\\\AsCommand",
+    "Symfony\\\\Component\\\\Console\\\\Command\\\\Command",
+    "Symfony\\\\Component\\\\Console\\\\Input\\\\InputInterface",
+    "Symfony\\\\Component\\\\Console\\\\Input\\\\InputOption",
+    "Symfony\\\\Component\\\\Console\\\\Output\\\\OutputInterface",
+    "zstd_compress",
+    "zstd_uncompress",
+    "gzdeflate",
+    "gzinflate"
+  ]
+}
