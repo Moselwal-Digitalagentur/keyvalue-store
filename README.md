@@ -22,7 +22,7 @@ Built-in override pack against TYPO3 Core's legacy Redis anti-patterns
 
 ```bash
 composer require moselwal/keyvalue-store
-```
+```text
 
 ### Requirements
 
@@ -94,7 +94,7 @@ $GLOBALS['TYPO3_CONF_VARS']['SYS']['session']['BE'] = [
         // TLS / Sentinel options as above
     ],
 ];
-```
+```text
 
 ### Locking strategy
 
@@ -192,7 +192,7 @@ by the Redis docs:
 
 ## Architecture
 
-```
+```text
 Classes/
 ├── Cache/Backend/
 │   └── KeyValueBackend.php          (extends TYPO3 Core RedisBackend)
@@ -223,7 +223,7 @@ vendor/bin/phpunit -c Tests/phpunit.xml --testsuite=Unit
 vendor/bin/phpunit -c Tests/phpunit.xml --testsuite=Functional   # needs Redis
 vendor/bin/phpstan analyse Classes --level=8
 vendor/bin/php-cs-fixer fix Classes Tests --config=vendor/moselwal/dev/.php-cs-fixer.dist.php
-```
+```text
 
 Tests gated with `#[RequiresPhpExtension('redis')]` skip locally when
 ext-redis is missing and run in CI / dev containers where it is
@@ -280,7 +280,7 @@ valkey-cli -n 4 FLUSHDB    # hash
 # 2. Restart workers so connections re-initialise with the new option
 
 # 3. Deploy the new typo3-config with the serializer change
-```
+```text
 
 **When `auto` is the wrong default**: an image update that ships
 `ext-igbinary` would silently switch the on-disk format for any cache
