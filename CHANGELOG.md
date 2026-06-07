@@ -1,3 +1,20 @@
+# [4.4.0](https://gitlab.moselwal.io/development/moselwal/keyvalue-store/compare/v4.3.4...v4.4.0) (2026-06-07)
+
+
+### Bug Fixes
+
+* **ci:** allow_failure on 9 known-broken component jobs ([87926b0](https://gitlab.moselwal.io/development/moselwal/keyvalue-store/commit/87926b08c752239b7e6ab9773ff4d1c0a60d7387))
+* composer normalize + require-checker whitelist for transitive symbols ([566fd43](https://gitlab.moselwal.io/development/moselwal/keyvalue-store/commit/566fd43b08bc2248907a9ce854e2dd6e41c650e5))
+* **composer:** add homepage field ([2e78769](https://gitlab.moselwal.io/development/moselwal/keyvalue-store/commit/2e78769770ac9fba0848c156d7146f9b8862533d))
+* extension-key keyvalue-store -> keyvalue_store ([5bf846f](https://gitlab.moselwal.io/development/moselwal/keyvalue-store/commit/5bf846fce0109a60ff5a5d90c2864ae89c0d3b64))
+* **md:** replace bare fenced codeblocks with ```text ([144499a](https://gitlab.moselwal.io/development/moselwal/keyvalue-store/commit/144499a4ae6bf0cd4012482d240d2fba92c3470f))
+* **md:** scope markdownlint to public surfaces ([8a0008b](https://gitlab.moselwal.io/development/moselwal/keyvalue-store/commit/8a0008b0f7ce5ecae291f034e97db7b90daa6f28))
+
+
+### Features
+
+* **ci:** add TER publish to release stage ([76c77c2](https://gitlab.moselwal.io/development/moselwal/keyvalue-store/commit/76c77c26715b64d6a08b7687784300857c768235))
+
 # Changelog
 
 All notable changes to `moselwal/keyvalue-store` are documented in this file.
