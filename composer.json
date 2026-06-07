@@ -28,7 +28,8 @@
     "homepage": "https://moselwal.de",
     "support": {
         "issues": "https://github.com/Moselwal-Digitalagentur/keyvalue-store/issues",
-        "source": "https://github.com/Moselwal-Digitalagentur/keyvalue-store"
+        "source": "https://github.com/Moselwal-Digitalagentur/keyvalue-store",
+        "docs": "https://moselwal.de/open-source/keyvalue-store"
     },
     "require": {
         "php": "^8.5",
