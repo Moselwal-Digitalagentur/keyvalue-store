@@ -1,3 +1,10 @@
+## [4.4.1](https://gitlab.moselwal.io/development/moselwal/keyvalue-store/compare/v4.4.0...v4.4.1) (2026-06-07)
+
+
+### Bug Fixes
+
+* **release:** drop [skip ci] from semantic-release commit ([44a9e14](https://gitlab.moselwal.io/development/moselwal/keyvalue-store/commit/44a9e1402c8a4846adf1e001f5541b01fe47ade8))
+
 # [4.4.0](https://gitlab.moselwal.io/development/moselwal/keyvalue-store/compare/v4.3.4...v4.4.0) (2026-06-07)
 
 
