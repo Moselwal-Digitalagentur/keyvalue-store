@@ -1,3 +1,15 @@
+# [4.5.0](https://gitlab.moselwal.io/development/moselwal/keyvalue-store/compare/v4.4.1...v4.5.0) (2026-06-11)
+
+
+### Bug Fixes
+
+* **release:** re-tag to publish to TER for the first time ([2fae9aa](https://gitlab.moselwal.io/development/moselwal/keyvalue-store/commit/2fae9aa166841ba3f0a14900806f437ab6b8f936))
+
+
+### Features
+
+* **release:** add develop branch as rc-prerelease channel ([1193bf6](https://gitlab.moselwal.io/development/moselwal/keyvalue-store/commit/1193bf62cc7945ba633cc75cc1ec7a9931da95f7))
+
 ## [4.4.1](https://gitlab.moselwal.io/development/moselwal/keyvalue-store/compare/v4.4.0...v4.4.1) (2026-06-07)
 
 
