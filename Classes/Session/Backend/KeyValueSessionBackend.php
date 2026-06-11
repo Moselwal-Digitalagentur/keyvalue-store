@@ -33,6 +33,10 @@ use TYPO3\CMS\Core\Session\Backend\SessionBackendInterface;
  *     'database'             => 2,
  *     'sessionLifetime'      => 3600,             // Redis TTL in seconds; default 3600
  *
+ *     // Session-ID hashing (security default since v4.4)
+ *     'hashSessionIds'       => true,             // HMAC ses_id before persisting as cache key
+ *     'hashSecret'           => '<random>',       // overrides TYPO3_CONF_VARS[SYS][encryptionKey]
+ *
  *     // Auth — phpredis-style 'auth' or legacy 'username'/'password'
  *     'auth'                 => ['myuser', 'mypassword'],  // ACL
  *     // -- or --
@@ -77,6 +81,7 @@ final class KeyValueSessionBackend implements SessionBackendInterface
     private const DEFAULT_CONNECT_TIMEOUT = 1.0;
     private const DEFAULT_READ_TIMEOUT = 1.0;
     private const DEFAULT_SESSION_LIFETIME = 3600;
+    private const HASH_ALGO = 'sha256';
 
     /**
      * Atomic rename of a session key while preserving TTL. Doing this with
@@ -101,6 +106,21 @@ final class KeyValueSessionBackend implements SessionBackendInterface
 
     private string $prefix = 'typo3:sess:';
 
+    /**
+     * HMAC secret for hashing session IDs before persistence. Pulled from
+     * the `hashSecret` option (preferred) or from
+     * `$GLOBALS['TYPO3_CONF_VARS']['SYS']['encryptionKey']` as fallback.
+     */
+    private string $hashSecret = '';
+
+    /**
+     * Whether to HMAC-hash the session ID before using it as a Redis key.
+     * Defaults to true. Disabling is supported for legacy migrations only —
+     * raw session IDs in Redis allow any operator with read access to the
+     * cache to lift active sessions.
+     */
+    private bool $hashSessionIds = true;
+
     private KeyValueConnectionFactory $factory;
 
     public function __construct()
@@ -117,6 +137,11 @@ final class KeyValueSessionBackend implements SessionBackendInterface
         $this->options = $configuration;
         $this->prefix = (string) ($configuration['prefix']
             ?? ('typo3:sess:' . strtolower($identifier) . ':'));
+        $this->hashSessionIds = (bool) ($configuration['hashSessionIds'] ?? true);
+        $this->hashSecret = trim((string) (
+            $configuration['hashSecret']
+            ?? ($GLOBALS['TYPO3_CONF_VARS']['SYS']['encryptionKey'] ?? '')
+        ));
         $this->redis = null;
         $this->validateConfiguration();
     }
@@ -140,6 +165,17 @@ final class KeyValueSessionBackend implements SessionBackendInterface
         $db = (int) ($this->options['database'] ?? self::DEFAULT_DB);
         if ($db < 0) {
             throw new \InvalidArgumentException('Redis database must be >= 0', 1730001003);
+        }
+
+        // Session-ID-Hashing requires a non-empty secret. Without it the
+        // session lookup would still work, but every cache-key would be a
+        // hash of the empty-string-keyed HMAC — predictable and useless
+        // as a security measure. Fail loudly instead.
+        if ($this->hashSessionIds && '' === $this->hashSecret) {
+            throw new \InvalidArgumentException(
+                'KeyValueSessionBackend: hashSessionIds=true but no hashSecret/$TYPO3_CONF_VARS[SYS][encryptionKey] is configured',
+                1733012001
+            );
         }
     }
 
@@ -355,8 +391,22 @@ final class KeyValueSessionBackend implements SessionBackendInterface
     // Internal helpers
     // -------------------------------------------------------------------------
 
+    /**
+     * Map a session ID to its Redis cache key.
+     *
+     * Session IDs land in Redis hashed by default — without that an
+     * operator with read access to the cache could lift any active
+     * session by reading the raw key and replaying it as a cookie. The
+     * cookie value the user holds is unchanged; only the persistence
+     * key is rewritten. `ses_id` inside the JSON payload still holds
+     * the plain session ID so TYPO3's interface contract stays intact.
+     */
     private function key(string $sessionId): string
     {
+        if ($this->hashSessionIds) {
+            return $this->prefix . hash_hmac(self::HASH_ALGO, $sessionId, $this->hashSecret);
+        }
+
         return $this->prefix . $sessionId;
     }
 

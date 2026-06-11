@@ -58,6 +58,12 @@ final class KeyValueSessionBackendRenewAtomicTest extends TestCase
         $backend->initialize('FE', [
             'hostname' => 'irrelevant.test',
             'sessionLifetime' => 3600,
+            // This test asserts the raw key strings ('typo3:sess:fe:old' …)
+            // passed to eval(). HMAC-hashing would replace those with hex
+            // digests and break the with(...) match. The atomic renew()
+            // behaviour itself is independent of the hashing layer, so
+            // pinning the legacy path here is safe and intentional.
+            'hashSessionIds' => false,
         ]);
 
         $prop = new \ReflectionProperty($backend, 'redis');

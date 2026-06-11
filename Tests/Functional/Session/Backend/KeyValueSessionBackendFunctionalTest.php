@@ -45,6 +45,7 @@ final class KeyValueSessionBackendFunctionalTest extends TestCase
             'port' => $port,
             'database' => 15,
             'sessionLifetime' => 3600,
+            'hashSecret' => 'functional-test-hash-secret-32bytes',
         ]);
 
         // Clean up test keys
@@ -199,6 +200,7 @@ final class KeyValueSessionBackendFunctionalTest extends TestCase
             'port' => (int) (getenv('REDIS_PORT') ?: 6379),
             'database' => 15,
             'sessionLifetime' => 1,
+            'hashSecret' => 'functional-test-hash-secret-32bytes',
         ]);
 
         $shortLivedBackend->set('expire-soon', ['ses_data' => 'temporary']);

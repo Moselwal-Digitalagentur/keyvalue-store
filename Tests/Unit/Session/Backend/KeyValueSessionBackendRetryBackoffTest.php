@@ -65,7 +65,10 @@ final class KeyValueSessionBackendRetryBackoffTest extends TestCase
     private function buildBackendWithFactory(KeyValueConnectionFactory $factory): KeyValueSessionBackend
     {
         $backend = new KeyValueSessionBackend();
-        $backend->initialize('FE', ['hostname' => 'irrelevant.test']);
+        $backend->initialize('FE', [
+            'hostname' => 'irrelevant.test',
+            'hashSessionIds' => false,
+        ]);
 
         $prop = new \ReflectionProperty($backend, 'factory');
         $prop->setValue($backend, $factory);

@@ -101,7 +101,12 @@ final class KeyValueSessionBackendGetAllTest extends TestCase
     private function invokeGetAllWithMockRedis(\Redis $redis): array
     {
         $backend = new KeyValueSessionBackend();
-        $backend->initialize('FE', ['hostname' => 'irrelevant.test']);
+        $backend->initialize('FE', [
+            'hostname' => 'irrelevant.test',
+            // hashSessionIds requires a secret; this test exercises getAll()
+            // and never hits key(), so the legacy raw-key path is fine here.
+            'hashSessionIds' => false,
+        ]);
 
         $prop = new \ReflectionProperty($backend, 'redis');
         $prop->setValue($backend, $redis);
