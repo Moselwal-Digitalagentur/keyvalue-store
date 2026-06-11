@@ -19,6 +19,28 @@ use PHPUnit\Framework\TestCase;
  */
 final class KeyValueSessionBackendTest extends TestCase
 {
+    private ?string $previousEncryptionKey = null;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        // Session-ID hashing (v4.4+) requires a non-empty secret. Inject
+        // a fixture encryptionKey for the configuration tests below; the
+        // hashing-specific behaviour is asserted in its own test class.
+        $this->previousEncryptionKey = $GLOBALS['TYPO3_CONF_VARS']['SYS']['encryptionKey'] ?? null;
+        $GLOBALS['TYPO3_CONF_VARS']['SYS']['encryptionKey'] = 'test-fixture-encryption-key-32bytes';
+    }
+
+    protected function tearDown(): void
+    {
+        if (null === $this->previousEncryptionKey) {
+            unset($GLOBALS['TYPO3_CONF_VARS']['SYS']['encryptionKey']);
+        } else {
+            $GLOBALS['TYPO3_CONF_VARS']['SYS']['encryptionKey'] = $this->previousEncryptionKey;
+        }
+        parent::tearDown();
+    }
+
     // -------------------------------------------------------------------------
     // initialize() — prefix handling
     // -------------------------------------------------------------------------
