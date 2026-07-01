@@ -43,7 +43,7 @@
     "repositories": [
         {
             "type": "composer",
-            "url": "https://gitlab.moselwal.io/api/v4/group/175/-/packages/composer/packages.json"
+            "url": "https://git.ole-hartwig.eu/api/v4/group/175/-/packages/composer/packages.json"
         }
     ],
     "autoload": {
