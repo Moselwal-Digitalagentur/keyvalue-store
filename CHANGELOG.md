@@ -1,3 +1,11 @@
+## [4.5.1](https://git.ole-hartwig.eu/development/moselwal/keyvalue-store/compare/v4.5.0...v4.5.1) (2026-07-24)
+
+
+### Bug Fixes
+
+* **ci:** adopt github-mirror 1.2.10 (skip mirror when no token) ([61e0da7](https://git.ole-hartwig.eu/development/moselwal/keyvalue-store/commit/61e0da7deb62758d4313b74b1627c188003bb278))
+* **ci:** github-mirror 1.2.11 (contains skip-if-no-token) ([636a41b](https://git.ole-hartwig.eu/development/moselwal/keyvalue-store/commit/636a41b70f5cbf03c73ebfaba993035d37c36840))
+
 # [4.5.0](https://gitlab.moselwal.io/development/moselwal/keyvalue-store/compare/v4.4.1...v4.5.0) (2026-06-11)
 
 
