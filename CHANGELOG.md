@@ -1,3 +1,11 @@
+## [4.5.2](https://git.ole-hartwig.eu/development/moselwal/keyvalue-store/compare/v4.5.1...v4.5.2) (2026-07-24)
+
+
+### Bug Fixes
+
+* **ci:** drop ter-publish (no TER publishing for now) ([12e5e8f](https://git.ole-hartwig.eu/development/moselwal/keyvalue-store/commit/12e5e8f09e489c65351b19fef1fca7ff10e55067))
+* **ci:** ter-publish 1.2.12 (az1a IPv4 for tailor install) ([0c56dd7](https://git.ole-hartwig.eu/development/moselwal/keyvalue-store/commit/0c56dd7e4330815afff70e018fa659161fa0211c))
+
 ## [4.5.1](https://git.ole-hartwig.eu/development/moselwal/keyvalue-store/compare/v4.5.0...v4.5.1) (2026-07-24)
 
 
